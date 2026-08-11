@@ -1,66 +1,160 @@
+<a id="readme-top"></a>
+
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/memegeko/aero7-shell/beta/docs/assets/aero7-logo.png" width="150" alt="Aero7 logo">
+
 # Aero7 Computer Management
 
-Aero7 Computer Management is a Windows 7-inspired administration console for
-Aero7 and Linux. It presents familiar management pages while reading and
-changing the real Linux system underneath. It does not emulate Windows APIs,
-invent data, or run the graphical application as root.
+### Familiar system administration for Aero7 and Linux
 
-## Implemented pages
+A native Qt 6 administration console that brings real Linux management tools
+together in one Aero7-style interface.
 
-- Computer Management overview: hostname, Aero7/Arch versions, kernel,
-  architecture, uptime, CPU, RAM, root disk, session, user, and network state.
-- Task Scheduler: system and user systemd timers, properties, enable/disable,
-  manual service runs, and creation/deletion of basic user timer tasks.
-- Event Viewer: journald categories, search, saved journal files, priority
-  translation, and complete event properties.
-- Shared Folders: configured Samba shares, sessions, open files, and Samba
-  user-share creation/removal when Samba is installed.
-- Local Users and Groups: libc account inventory plus authenticated standard
-  account and group operations through a narrowly scoped polkit helper.
-- Performance Monitor: asynchronous CPU, memory, swap, disk, network,
-  process, and context-switch sampling with selectable live graph counters.
-- Device Manager: integration with the existing `devmgmt` hardware tool.
-- Disk Management: UDisks2 disk/volume inventory, properties, rescan,
-  mount/unmount, and mount-point opening.
-- Services: system and user systemd units, dependencies, recent journal logs,
-  and start/stop/restart/reload/enable/disable/mask actions over D-Bus.
+[![Arch Linux](https://img.shields.io/badge/Arch_Linux-supported-1793D1?logo=archlinux&logoColor=white)](https://archlinux.org/)
+[![KDE Plasma](https://img.shields.io/badge/KDE_Plasma-6-1D99F3?logo=kde&logoColor=white)](https://kde.org/plasma-desktop/)
+[![MIT License](https://img.shields.io/badge/license-MIT-2ea44f.svg)](LICENSE)
 
-Destructive partition editing is intentionally disabled until its UDisks2 and
-system-partition protection path receives separate hardware testing.
+[Features](#features) ·
+[Installation](#installation) ·
+[Documentation](#documentation) ·
+[Roadmap](docs/ROADMAP.md) ·
+[Report a bug](https://github.com/memegeko/aero7-computer-management/issues/new)
 
-Every tool supports a stable command-line deep link, for example:
+</div>
 
-```console
-aero7-compmgmt --open event-viewer
-aero7-compmgmt --open disk-management
-aero7-compmgmt --open services
+---
+
+**Aero7 Computer Management is an independent project and is not affiliated
+with or endorsed by Microsoft Corporation. Windows is a trademark of the
+Microsoft group of companies.**
+
+> [!NOTE]
+> Aero7 Computer Management is under active development. Read-only inspection
+> and normal service actions are available now. Destructive partition editing
+> remains disabled until it completes dedicated hardware testing.
+
+## About the project
+
+Aero7 Computer Management is the advanced administration console for the
+[Aero7](https://github.com/memegeko/aero7) Linux operating system. It recreates
+the familiar organization of a classic Computer Management window while using
+real Linux services, devices, accounts, disks, logs, and performance data.
+
+The application does not emulate Windows APIs, invent system information, or
+run its graphical interface as root. Each page talks to the appropriate Linux
+backend and requests authentication only when an administrative action needs
+it.
+
+## Features
+
+| Management tool | Aero7/Linux backend | Current functionality |
+| --- | --- | --- |
+| Overview | Linux system information | Hostname, Aero7 version, kernel, hardware, uptime, memory, disk, user, session, and network status |
+| Task Scheduler | systemd timers | View system and user timers, inspect properties, enable or disable timers, run services, and manage basic user tasks |
+| Event Viewer | systemd journal | Browse categorized events, search logs, open saved journals, and inspect full event details |
+| Shared Folders | Samba | View configured shares, sessions, and open files, with user-share management when Samba is installed |
+| Local Users and Groups | Linux accounts and groups | View accounts and groups and perform authenticated standard account operations |
+| Performance Monitor | `/proc` and `/sys` | Live CPU, memory, swap, disk, network, process, and context-switch graphs with stable navigation panes |
+| Device Manager | [linux-devmgmt](https://github.com/memegeko/linux-devmgmt) | Open the complete device tree or jump directly to a searchable hardware category |
+| Disk Management | UDisks2 | Windows 7-style disk map, real volume information, properties, rescan, mount, unmount, and open mount point |
+| Services | systemd | View system and user services, dependencies and logs, and perform service lifecycle actions |
+
+### Disk Management
+
+Disk Management presents real disks and partitions in a two-part layout: a
+volume table above and a proportional graphical disk map below. Mounted paths,
+file systems, capacity, free space, partition state, and removable media come
+from UDisks2.
+
+Safe actions such as refresh, rescan, properties, mount, unmount, and opening a
+mount point are available. Creating, deleting, formatting, and resizing
+partitions remain intentionally unavailable in this development milestone.
+
+### Start-menu integration
+
+Computer Management and each main module can be found from the Aero7 Start
+menu. Application results appear first. Control Panel settings and Device
+Manager hardware categories are then shown beneath their own clearly labelled
+separators, avoiding duplicate or confusing KDE System Settings results.
+
+Selecting a result such as **Disk Management**, **Event Viewer**, **Services**,
+or **Storage Controllers** opens the matching page or hardware category
+directly.
+
+## Installation
+
+Aero7 Computer Management is included with Aero7 and distributed through the
+official [Aero7 Package Repository](https://github.com/memegeko/aero7-repo).
+
+On an Aero7 system, install or update it with:
+
+```bash
+sudo pacman -S aero7-computer-management-git
 ```
 
-The Aero7 Start menu consumes the standalone search catalog printed by:
+Updates are delivered through the normal Aero7 system update process.
 
-```console
-aero7-compmgmt --list-settings-json
-```
+## Security
 
-## Build and test
+The graphical application always runs as the signed-in desktop user. systemd
+and UDisks2 actions use their D-Bus interfaces and existing polkit policies.
+Local account changes use a narrowly scoped helper that validates every
+argument and permits only its documented account-management operations.
 
-```console
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
+The application does not execute administrative commands through a shell,
+edit the password database directly, or make the entire interface privileged.
 
-Requirements: CMake 3.24+, C++17, Qt 6 Widgets/DBus/Concurrent, systemd,
-UDisks2, polkit, and shadow. Samba and linux-devmgmt are optional integrations.
+## Project status
 
-## Security model
+The current release includes working Linux backends for every main navigation
+item. Automated tests cover the management pages, Start-menu catalogs, deep
+links, navigation layout, and backend data handling. Releases are also tested
+inside an Aero7 virtual machine through the same signed packages delivered to
+installed systems.
 
-The GUI runs as the desktop user. systemd and UDisks2 actions use their D-Bus
-interfaces and existing polkit policies. Local account changes invoke only
-`/usr/lib/aero7/aero7-compmgmt-helper` through polkit; that helper validates
-every argument and permits only its fixed set of standard account-tool calls.
-No backend uses `sh -c`, edits `/etc/passwd` directly, or executes `sudo`.
+Destructive storage operations are the main intentionally deferred area. See
+the [roadmap](docs/ROADMAP.md) for the remaining work.
+
+## Documentation
+
+| Topic | Document |
+| --- | --- |
+| Application structure and security boundaries | [Architecture](docs/ARCHITECTURE.md) |
+| Linux service and data mappings | [Backends](docs/BACKENDS.md) |
+| Start-menu search and direct module links | [Start-menu integration](docs/START-MENU-INTEGRATION.md) |
+| Automated and virtual-machine verification | [Testing](docs/TESTING.md) |
+| Planned features and milestones | [Roadmap](docs/ROADMAP.md) |
+
+## Related Aero7 projects
+
+- [Aero7](https://github.com/memegeko/aero7) — the Aero7 operating system and installer
+- [Aero7 Shell](https://github.com/memegeko/aero7-shell) — desktop shell and system integration
+- [Aero7 Control Panel](https://github.com/memegeko/aero7-control-panel-) — everyday settings and configuration
+- [Aero7 Package Repository](https://github.com/memegeko/aero7-repo) — signed packages and updates
+- [linux-devmgmt](https://github.com/memegeko/linux-devmgmt) — Device Manager backend and interface
+
+## Contributing
+
+Bug reports, tested fixes, backend improvements, and documentation updates are
+welcome. Please describe the real Linux API or service behind a proposed
+management action and include safe failure handling for privileged operations.
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [THIRD_PARTY.md](THIRD_PARTY.md).
+Aero7 Computer Management is distributed under the [MIT License](LICENSE).
+Third-party components retain their own licenses and attribution; see
+[THIRD_PARTY.md](THIRD_PARTY.md).
+
+## Legal / Trademark Notice
+
+Aero7 Computer Management is an independent open-source project and is not
+affiliated with, authorized, sponsored, endorsed, or approved by Microsoft
+Corporation.
+
+Microsoft and Windows are trademarks of the Microsoft group of companies. All
+other trademarks are the property of their respective owners. This project
+recreates interface concepts and does not include or redistribute proprietary
+Microsoft assets.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
