@@ -28,6 +28,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_splitter=new QSplitter(this);m_tree=new QTreeWidget(m_splitter);m_pages=new QStackedWidget(m_splitter);m_actions=new QWidget(m_splitter);m_actionsLayout=new QVBoxLayout(m_actions);
     m_tree->setHeaderLabel("Console Tree");m_tree->setMinimumWidth(210);m_actions->setMinimumWidth(185);m_actions->setMaximumWidth(260);
     m_splitter->addWidget(m_tree);m_splitter->addWidget(m_pages);m_splitter->addWidget(m_actions);m_splitter->setStretchFactor(1,1);setCentralWidget(m_splitter);
+    connect(m_toggleTree,&QAction::toggled,m_tree,&QWidget::setVisible);
     buildTree();
     connect(m_tree,&QTreeWidget::itemActivated,this,[this](QTreeWidgetItem *i){const QString id=i->data(0,Qt::UserRole).toString();if(NavigationNodes::isValid(id))navigate(id);});
     connect(m_tree,&QTreeWidget::itemClicked,this,[this](QTreeWidgetItem *i){const QString id=i->data(0,Qt::UserRole).toString();if(NavigationNodes::isValid(id))navigate(id);});
@@ -43,7 +44,7 @@ void MainWindow::buildMenus()
 {
     auto *file=menuBar()->addMenu("&File");file->addAction("E&xit",qApp,&QApplication::quit);
     auto *action=menuBar()->addMenu("&Action");auto *refresh=action->addAction(QIcon::fromTheme("view-refresh"),"&Refresh");connect(refresh,&QAction::triggered,this,[this]{if(m_currentPage)m_currentPage->refresh();});
-    auto *view=menuBar()->addMenu("&View");m_toggleTree=view->addAction("Show Console Tree");m_toggleTree->setCheckable(true);m_toggleTree->setChecked(true);connect(m_toggleTree,&QAction::toggled,m_tree,&QWidget::setVisible);
+    auto *view=menuBar()->addMenu("&View");m_toggleTree=view->addAction("Show Console Tree");m_toggleTree->setCheckable(true);m_toggleTree->setChecked(true);
     auto *help=menuBar()->addMenu("&Help");help->addAction("Online documentation",[] {QDesktopServices::openUrl(QUrl("https://github.com/memegeko/aero7-computer-management#readme"));});help->addAction("About Computer Management",this,[this]{QMessageBox::about(this,"About Computer Management","Aero7 Computer Management 0.1\n\nOriginal MIT-licensed software from the Aero7 Open Project.");});
     auto *bar=addToolBar("Management");bar->setMovable(false);bar->setIconSize({16,16});
     m_back=bar->addAction(QIcon::fromTheme("go-previous"),"Back",this,[this]{navigate(m_history.back(),false);});
