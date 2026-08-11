@@ -6,9 +6,9 @@
 int main()
 {
     const QStringList expected = {
-        "overview", "task-scheduler", "event-viewer", "shared-folders",
+        "overview", "system-tools", "task-scheduler", "event-viewer", "shared-folders",
         "local-users-groups", "users", "groups", "performance",
-        "device-manager", "disk-management", "services"
+        "device-manager", "storage", "disk-management", "services-applications", "services"
     };
     if (NavigationNodes::validIds() != expected)
         return 1;
@@ -20,7 +20,7 @@ int main()
         if (!node.parentId.isEmpty() && !NavigationNodes::find(node.parentId))
             return 3;
     }
-    if (NavigationNodes::isValid("system-tools") || NavigationNodes::isValid("unknown"))
+    if (!NavigationNodes::isValid("system-tools") || NavigationNodes::isValid("unknown"))
         return 4;
 
     NavigationHistory history;
@@ -34,4 +34,3 @@ int main()
         return 7;
     return 0;
 }
-

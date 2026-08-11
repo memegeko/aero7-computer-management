@@ -5,7 +5,7 @@ pkgdesc='Aero7-native Computer Management console for Linux'
 arch=('x86_64')
 url='https://github.com/memegeko/aero7-computer-management'
 license=('MIT')
-depends=('qt6-base' 'systemd' 'udisks2')
+depends=('qt6-base' 'systemd' 'udisks2' 'polkit' 'shadow')
 makedepends=('cmake' 'ninja' 'git')
 optdepends=('samba: Shared Folders status'
             'linux-devmgmt: Device Manager integration')
@@ -32,4 +32,3 @@ package() {
   install -Dm644 "$srcdir/aero7-computer-management/LICENSE" \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
-

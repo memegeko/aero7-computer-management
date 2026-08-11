@@ -16,11 +16,12 @@ public slots:
 signals:
     void actionsChanged(const QStringList &actions);
     void statusMessage(const QString &message);
+    void navigationRequested(const QString &nodeId);
 
 protected:
     void announceActions();
+    void navigateTo(const QString &nodeId) { emit navigationRequested(nodeId); }
 
 private:
     QString m_nodeId;
 };
-

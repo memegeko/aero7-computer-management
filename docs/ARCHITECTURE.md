@@ -12,11 +12,10 @@ The tree and CLI use the same stable IDs. A deep link such as
 `aero7-compmgmt --open services` therefore reaches the same page as clicking
 Services in the tree. Group nodes are intentionally not directly routable.
 
-The process is never meant to run as root. Privileged actions belong behind a
-reviewed system service or polkit boundary. The testing milestone exposes only
-read operations plus UDisks2 mount/unmount, which already uses the system's
-authorization policy.
+The graphical process never runs as root. systemd and UDisks2 changes use
+their D-Bus APIs and polkit authorization. Local account changes cross a
+separate, narrowly scoped polkit helper boundary; the helper validates its
+arguments and can only invoke a fixed list of standard account tools.
 
 Device Manager remains a separate program. Computer Management checks for and
 launches `devmgmt`; it does not duplicate or embed that code.
-

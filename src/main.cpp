@@ -20,7 +20,7 @@ int main(int argc,char **argv)
     if(parser.isSet(listSettings)){
         QJsonArray catalog;
         for(const auto &node:NavigationNodes::all()){
-            if(!node.selectable)continue;
+            if(!node.selectable || !node.searchable)continue;
             catalog.append(QJsonObject{
                 {"key",node.id},{"name",node.name},{"description",QString("Open %1 in Computer Management.").arg(node.name)},
                 {"icon",node.icon},{"section","Computer Management"},{"keywords",QString("%1 administration management settings linux").arg(node.id)}

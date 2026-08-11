@@ -4,9 +4,10 @@
 #include <QDBusConnectionInterface>
 #include <QDBusInterface>
 #include <QDBusObjectPath>
-#include <QDBusPendingReply>
 #include <QDBusReply>
-#include <QDBusVariant>
+#include <QStorageInfo>
+
+#include <algorithm>
 
 namespace {
 QVariantMap properties(const QString &path, const QString &interface)
@@ -19,18 +20,30 @@ QVariantMap properties(const QString &path, const QString &interface)
 
 QString decodedBytes(const QVariant &value)
 {
-    QByteArray bytes;
-    if (value.canConvert<QByteArray>()) bytes = value.toByteArray();
+    QByteArray bytes = value.toByteArray();
     if (!bytes.isEmpty() && bytes.endsWith('\0')) bytes.chop(1);
     return QString::fromLocal8Bit(bytes);
 }
 
-bool filesystemCall(const QString &path, const QString &method, QString *error)
+QString firstMountPoint(const QVariant &value)
 {
-    QDBusInterface fs("org.freedesktop.UDisks2", path,
-                      "org.freedesktop.UDisks2.Filesystem", QDBusConnection::systemBus());
-    if (!fs.isValid()) { if (error) *error = "This item has no UDisks2 filesystem interface."; return false; }
-    const QDBusMessage reply = fs.call(method, QVariantMap{});
+    const QList<QByteArray> mounts = value.value<QList<QByteArray>>();
+    if (mounts.isEmpty()) return {};
+    QByteArray path = mounts.first();
+    if (path.endsWith('\0')) path.chop(1);
+    return QString::fromLocal8Bit(path);
+}
+
+bool interfaceCall(const QString &path, const QString &interface, const QString &method,
+                   QString *error)
+{
+    QDBusInterface object("org.freedesktop.UDisks2", path, interface,
+                          QDBusConnection::systemBus());
+    if (!object.isValid()) {
+        if (error) *error = QString("This item has no %1 interface.").arg(interface.section('.', -1));
+        return false;
+    }
+    const QDBusMessage reply = object.call(method, QVariantMap{});
     if (reply.type() == QDBusMessage::ErrorMessage) {
         if (error) *error = reply.errorMessage();
         return false;
@@ -47,28 +60,73 @@ bool UDisksBackend::available()
 
 QList<BlockDevice> UDisksBackend::devices(QString *error)
 {
-    if (!available()) { if (error) *error = "UDisks2 is not available on the system bus."; return {}; }
+    if (!available()) {
+        if (error) *error = "UDisks2 is not available on the system bus.";
+        return {};
+    }
     QDBusInterface manager("org.freedesktop.UDisks2", "/org/freedesktop/UDisks2/Manager",
                            "org.freedesktop.UDisks2.Manager", QDBusConnection::systemBus());
     const QDBusReply<QList<QDBusObjectPath>> reply = manager.call("GetBlockDevices", QVariantMap{});
-    if (!reply.isValid()) { if (error) *error = reply.error().message(); return {}; }
-    QList<BlockDevice> out;
+    if (!reply.isValid()) {
+        if (error) *error = reply.error().message();
+        return {};
+    }
+
+    QList<BlockDevice> result;
     for (const QDBusObjectPath &path : reply.value()) {
         const QVariantMap block = properties(path.path(), "org.freedesktop.UDisks2.Block");
-        const QVariantMap fs = properties(path.path(), "org.freedesktop.UDisks2.Filesystem");
-        BlockDevice dev;
-        dev.objectPath = path.path();
-        dev.device = decodedBytes(block.value("PreferredDevice"));
-        dev.label = block.value("IdLabel").toString();
-        dev.fileSystem = block.value("IdType").toString();
-        dev.size = block.value("Size").toULongLong();
-        dev.mountable = !fs.isEmpty();
-        const auto mounts = fs.value("MountPoints").value<QList<QByteArray>>();
-        if (!mounts.isEmpty()) dev.mountPoint = QString::fromLocal8Bit(mounts.first().chopped(1));
-        out << dev;
+        const QVariantMap filesystem = properties(path.path(), "org.freedesktop.UDisks2.Filesystem");
+        const QVariantMap partition = properties(path.path(), "org.freedesktop.UDisks2.Partition");
+        const QVariantMap table = properties(path.path(), "org.freedesktop.UDisks2.PartitionTable");
+        BlockDevice device;
+        device.objectPath = path.path();
+        device.device = decodedBytes(block.value("PreferredDevice"));
+        device.label = block.value("IdLabel").toString();
+        device.fileSystem = block.value("IdType").toString();
+        device.uuid = block.value("IdUUID").toString();
+        device.readOnly = block.value("ReadOnly").toBool();
+        device.size = block.value("Size").toULongLong();
+        device.mountable = !filesystem.isEmpty();
+        device.mountPoint = firstMountPoint(filesystem.value("MountPoints"));
+        if (!device.mountPoint.isEmpty()) {
+            const QStorageInfo storage(device.mountPoint);
+            if (storage.isValid()) device.freeBytes = storage.bytesAvailable();
+        }
+        device.partition = !partition.isEmpty();
+        device.partitionNumber = partition.value("Number").toUInt();
+        device.partitionOffset = partition.value("Offset").toULongLong();
+        device.partUuid = partition.value("UUID").toString();
+        device.partitionTable = table.value("Type").toString();
+        const QDBusObjectPath drive = block.value("Drive").value<QDBusObjectPath>();
+        device.driveObjectPath = drive.path();
+        if (!device.driveObjectPath.isEmpty() && device.driveObjectPath != "/") {
+            const QVariantMap driveProperties = properties(device.driveObjectPath, "org.freedesktop.UDisks2.Drive");
+            device.driveModel = driveProperties.value("Model").toString().trimmed();
+            device.serial = driveProperties.value("Serial").toString().trimmed();
+            device.removable = driveProperties.value("Removable").toBool()
+                || driveProperties.value("MediaRemovable").toBool();
+        }
+        result << device;
     }
-    return out;
+    std::sort(result.begin(), result.end(), [](const BlockDevice &a, const BlockDevice &b) {
+        if (a.driveObjectPath != b.driveObjectPath) return a.driveObjectPath < b.driveObjectPath;
+        if (a.partition != b.partition) return !a.partition;
+        return a.partitionOffset < b.partitionOffset;
+    });
+    return result;
 }
 
-bool UDisksBackend::mount(const QString &objectPath, QString *error) { return filesystemCall(objectPath, "Mount", error); }
-bool UDisksBackend::unmount(const QString &objectPath, QString *error) { return filesystemCall(objectPath, "Unmount", error); }
+bool UDisksBackend::mount(const QString &objectPath, QString *error)
+{
+    return interfaceCall(objectPath, "org.freedesktop.UDisks2.Filesystem", "Mount", error);
+}
+
+bool UDisksBackend::unmount(const QString &objectPath, QString *error)
+{
+    return interfaceCall(objectPath, "org.freedesktop.UDisks2.Filesystem", "Unmount", error);
+}
+
+bool UDisksBackend::rescan(const QString &objectPath, QString *error)
+{
+    return interfaceCall(objectPath, "org.freedesktop.UDisks2.Block", "Rescan", error);
+}

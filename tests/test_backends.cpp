@@ -1,8 +1,11 @@
 #include "backends/AccountsBackend.h"
 #include "backends/SystemdBackend.h"
+#include "backends/SystemInfoBackend.h"
+#include "backends/JournalBackend.h"
 #include "util/Format.h"
 
 #include <QSet>
+#include <QTextStream>
 
 int main()
 {
@@ -32,6 +35,20 @@ int main()
     for (const auto &user : users) {
         if (user.name.isEmpty() || userNames.contains(user.name)) return 5;
         userNames.insert(user.name);
+    }
+    if (JournalBackend::priorityName(0) != "Critical"
+        || JournalBackend::priorityName(3) != "Error"
+        || JournalBackend::priorityName(4) != "Warning"
+        || JournalBackend::priorityName(6) != "Information"
+        || JournalBackend::priorityName(7) != "Verbose")
+        return 6;
+    const auto summary = SystemInfoBackend::summary();
+    if (summary.computerName.isEmpty() || summary.kernelVersion.isEmpty()
+        || summary.cpu.isEmpty() || summary.memory == "0 B") {
+        QTextStream(stderr) << "Invalid system summary: host='" << summary.computerName
+                            << "' kernel='" << summary.kernelVersion << "' cpu='"
+                            << summary.cpu << "' memory='" << summary.memory << "'\n";
+        return 7;
     }
     return 0;
 }

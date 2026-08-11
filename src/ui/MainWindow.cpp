@@ -29,6 +29,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_tree->setHeaderLabel("Console Tree");m_tree->setMinimumWidth(210);m_actions->setMinimumWidth(185);m_actions->setMaximumWidth(260);
     m_splitter->addWidget(m_tree);m_splitter->addWidget(m_pages);m_splitter->addWidget(m_actions);m_splitter->setStretchFactor(1,1);setCentralWidget(m_splitter);
     connect(m_toggleTree,&QAction::toggled,m_tree,&QWidget::setVisible);
+    connect(m_toggleActions,&QAction::toggled,m_actions,&QWidget::setVisible);
     buildTree();
     connect(m_tree,&QTreeWidget::itemActivated,this,[this](QTreeWidgetItem *i){const QString id=i->data(0,Qt::UserRole).toString();if(NavigationNodes::isValid(id))navigate(id);});
     connect(m_tree,&QTreeWidget::itemClicked,this,[this](QTreeWidgetItem *i){const QString id=i->data(0,Qt::UserRole).toString();if(NavigationNodes::isValid(id))navigate(id);});
@@ -42,20 +43,25 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::buildMenus()
 {
-    auto *file=menuBar()->addMenu("&File");file->addAction("E&xit",qApp,&QApplication::quit);
-    auto *action=menuBar()->addMenu("&Action");auto *refresh=action->addAction(QIcon::fromTheme("view-refresh"),"&Refresh");connect(refresh,&QAction::triggered,this,[this]{if(m_currentPage)m_currentPage->refresh();});
-    auto *view=menuBar()->addMenu("&View");m_toggleTree=view->addAction("Show Console Tree");m_toggleTree->setCheckable(true);m_toggleTree->setChecked(true);
-    auto *help=menuBar()->addMenu("&Help");help->addAction("Online documentation",[] {QDesktopServices::openUrl(QUrl("https://github.com/memegeko/aero7-computer-management#readme"));});help->addAction("About Computer Management",this,[this]{QMessageBox::about(this,"About Computer Management","Aero7 Computer Management 0.1\n\nOriginal MIT-licensed software from the Aero7 Open Project.");});
+    auto *file=menuBar()->addMenu("&File");file->addAction("E&xit",this,&QWidget::close);
+    m_actionMenu=menuBar()->addMenu("&Action");
+    auto *view=menuBar()->addMenu("&View");
+    m_viewBack=view->addAction(QIcon::fromTheme("go-previous"),"&Back",this,[this]{if(m_history.canGoBack())navigate(m_history.back(),false);});
+    m_viewForward=view->addAction(QIcon::fromTheme("go-next"),"&Forward",this,[this]{if(m_history.canGoForward())navigate(m_history.forward(),false);});
+    view->addSeparator();
+    m_toggleTree=view->addAction("Show Console Tree");m_toggleTree->setCheckable(true);m_toggleTree->setChecked(true);
+    m_toggleActions=view->addAction("Show Actions Pane");m_toggleActions->setCheckable(true);m_toggleActions->setChecked(true);
+    view->addSeparator();
+    view->addAction(QIcon::fromTheme("view-refresh"),"&Refresh",this,[this]{if(m_currentPage)m_currentPage->refresh();});
+    auto *help=menuBar()->addMenu("&Help");help->addAction("Help Topics",[] {QDesktopServices::openUrl(QUrl("https://github.com/memegeko/aero7-computer-management/wiki"));});help->addAction("About Computer Management",this,[this]{QMessageBox::about(this,"About Computer Management","Computer Management\nAero7 Open Project\nVersion 0.2\n\nReal Linux backends: systemd, journald, Samba, procfs/sysfs, libc accounts, UDisks2.\nOriginal MIT-licensed software.");});
     auto *bar=addToolBar("Management");bar->setMovable(false);bar->setIconSize({16,16});
     m_back=bar->addAction(QIcon::fromTheme("go-previous"),"Back",this,[this]{navigate(m_history.back(),false);});
     m_forward=bar->addAction(QIcon::fromTheme("go-next"),"Forward",this,[this]{navigate(m_history.forward(),false);});
     bar->addAction(QIcon::fromTheme("view-list-tree"),"Show or hide console tree",m_toggleTree,&QAction::toggle);
     bar->addSeparator();
-    bar->addAction(QIcon::fromTheme("document-properties"),"Properties",this,[this]{
-        if(m_currentPage) QMessageBox::information(this,"Properties",QString("Page ID: %1\nBackend details are documented in BACKENDS.md.").arg(m_currentPage->nodeId()));
-    });
+    m_properties=bar->addAction(QIcon::fromTheme("document-properties"),"Properties",this,[this]{if(m_currentPage)m_currentPage->triggerAction("Properties");});
     bar->addAction(QIcon::fromTheme("view-refresh"),"Refresh",this,[this]{if(m_currentPage)m_currentPage->refresh();});
-    bar->addAction(QIcon::fromTheme("help-contents"),"Help",[]{QDesktopServices::openUrl(QUrl("https://github.com/memegeko/aero7-computer-management#readme"));});
+    bar->addAction(QIcon::fromTheme("help-contents"),"Help",[]{QDesktopServices::openUrl(QUrl("https://github.com/memegeko/aero7-computer-management/wiki"));});
 }
 
 void MainWindow::buildTree()
@@ -68,28 +74,47 @@ void MainWindow::buildTree()
 
 ManagementPage *MainWindow::page(const QString &id)
 {
-    if(m_pageMap.contains(id))return m_pageMap.value(id);auto *p=Pages::create(id,m_pages);m_pageMap.insert(id,p);m_pages->addWidget(p);
-    connect(p,&ManagementPage::actionsChanged,this,&MainWindow::showActions);
-    connect(p,&ManagementPage::statusMessage,this,[this](const QString &message){statusBar()->showMessage(message);});
+    if (m_pageMap.contains(id))
+        return m_pageMap.value(id);
+    auto *p = Pages::create(id, m_pages);
+    m_pageMap.insert(id, p);
+    m_pages->addWidget(p);
+    connect(p,&ManagementPage::actionsChanged,this,[this,p](const QStringList &actions){if(m_currentPage==p)showActions(actions);});
+    connect(p,&ManagementPage::statusMessage,this,[this,p](const QString &message){if(m_currentPage==p)statusBar()->showMessage(message);});
+    connect(p,&ManagementPage::navigationRequested,this,[this](const QString &nodeId){navigate(nodeId);});
     return p;
 }
 
 void MainWindow::navigate(const QString &id,bool record)
 {
-    if(!NavigationNodes::isValid(id))return;if(record)m_history.visit(id);m_currentPage=page(id);m_pages->setCurrentWidget(m_currentPage);m_tree->setCurrentItem(m_items.value(id));showActions(m_currentPage->actions());m_currentPage->refresh();updateHistoryActions();
+    if (!NavigationNodes::isValid(id))
+        return;
+    if (record)
+        m_history.visit(id);
+    m_currentPage = page(id);
+    m_pages->setCurrentWidget(m_currentPage);
+    m_tree->setCurrentItem(m_items.value(id));
+    showActions(m_currentPage->actions());
+    m_currentPage->refresh();
+    updateHistoryActions();
 }
 
 bool MainWindow::openNode(const QString &id){if(!NavigationNodes::isValid(id))return false;navigate(id);return true;}
 
 void MainWindow::showActions(const QStringList &actions)
 {
+    m_properties->setEnabled(actions.contains("Properties"));
+    m_actionMenu->clear();
     while(auto *item=m_actionsLayout->takeAt(0)){if(item->widget())item->widget()->deleteLater();delete item;}
     auto *title=new QLabel("Actions");QFont f=title->font();f.setBold(true);title->setFont(f);m_actionsLayout->addWidget(title);
-    for(const QString &name:actions){auto *button=new QPushButton(name);button->setFlat(true);button->setStyleSheet("text-align:left;color:#0645ad;padding:4px;");connect(button,&QPushButton::clicked,this,[this,name]{if(m_currentPage)m_currentPage->triggerAction(name);});m_actionsLayout->addWidget(button);}
+    for(const QString &name:actions){
+        auto *menuAction=m_actionMenu->addAction(name);connect(menuAction,&QAction::triggered,this,[this,name]{if(m_currentPage)m_currentPage->triggerAction(name);});
+        auto *button=new QPushButton(name);button->setFlat(true);button->setStyleSheet("text-align:left;color:#0645ad;padding:4px;");connect(button,&QPushButton::clicked,this,[this,name]{if(m_currentPage)m_currentPage->triggerAction(name);});m_actionsLayout->addWidget(button);
+    }
     m_actionsLayout->addStretch();
 }
 
-void MainWindow::updateHistoryActions(){m_back->setEnabled(m_history.canGoBack());m_forward->setEnabled(m_history.canGoForward());}
+void MainWindow::updateHistoryActions(){const bool back=m_history.canGoBack(),forward=m_history.canGoForward();m_back->setEnabled(back);m_forward->setEnabled(forward);m_viewBack->setEnabled(back);m_viewForward->setEnabled(forward);}
 
 void MainWindow::restoreState(){
     QSettings s("Aero7","ComputerManagement");restoreGeometry(s.value("geometry").toByteArray());m_splitter->restoreState(s.value("splitter").toByteArray());

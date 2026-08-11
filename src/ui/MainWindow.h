@@ -7,6 +7,7 @@
 
 class QAction;
 class QSplitter;
+class QMenu;
 class QStackedWidget;
 class QToolBar;
 class QTreeWidget;
@@ -40,10 +41,14 @@ private:
     QVBoxLayout *m_actionsLayout = nullptr;
     QAction *m_back = nullptr;
     QAction *m_forward = nullptr;
+    QAction *m_viewBack = nullptr;
+    QAction *m_viewForward = nullptr;
+    QAction *m_properties = nullptr;
     QAction *m_toggleTree = nullptr;
+    QAction *m_toggleActions = nullptr;
+    QMenu *m_actionMenu = nullptr;
     NavigationHistory m_history;
     QHash<QString,QTreeWidgetItem*> m_items;
     QHash<QString,ManagementPage*> m_pageMap;
     ManagementPage *m_currentPage = nullptr;
 };
-

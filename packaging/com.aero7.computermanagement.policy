@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Aero7 Open Project</vendor>
+  <vendor_url>https://aero7.miku-dayo.com/</vendor_url>
+  <action id="com.aero7.computermanagement.accounts">
+    <description>Manage local users and groups</description>
+    <message>Authentication is required to manage local users and groups</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/aero7/aero7-compmgmt-helper</annotate>
+  </action>
+</policyconfig>

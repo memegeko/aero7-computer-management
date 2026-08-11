@@ -2,6 +2,7 @@ set(CORE_SOURCES
     model/NavigationNodes.cpp
     model/NavigationHistory.cpp
     util/Format.cpp
+    backends/SystemInfoBackend.cpp
     backends/AccountsBackend.cpp
     backends/SystemdBackend.cpp
     backends/JournalBackend.cpp
@@ -18,9 +19,13 @@ add_executable(aero7-compmgmt
     main.cpp
     ui/MainWindow.cpp
     ui/ManagementPage.cpp
+    ui/PerformanceGraph.cpp
     ui/Pages.cpp
 )
-target_link_libraries(aero7-compmgmt PRIVATE aero7-compmgmt-core)
+target_link_libraries(aero7-compmgmt PRIVATE aero7-compmgmt-core Qt6::Concurrent)
+
+add_executable(aero7-compmgmt-helper helper/main.cpp)
+target_link_libraries(aero7-compmgmt-helper PRIVATE Qt6::Core)
 
 install(TARGETS aero7-compmgmt RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
+install(TARGETS aero7-compmgmt-helper RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR}/aero7)

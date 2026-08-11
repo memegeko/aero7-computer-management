@@ -27,3 +27,22 @@ foreach(entry IN LISTS expected_entries)
         message(FATAL_ERROR "${file_name} does not use ${icon_name}")
     endif()
 endforeach()
+
+set(policy_path "${SOURCE_DIR}/packaging/com.aero7.computermanagement.policy")
+if(NOT EXISTS "${policy_path}")
+    message(FATAL_ERROR "Missing Computer Management polkit policy")
+endif()
+file(READ "${policy_path}" policy)
+foreach(required
+    "com.aero7.computermanagement.accounts"
+    "/usr/lib/aero7/aero7-compmgmt-helper"
+    "auth_admin_keep")
+    if(NOT policy MATCHES "${required}")
+        message(FATAL_ERROR "Computer Management policy is missing: ${required}")
+    endif()
+endforeach()
+
+file(READ "${SOURCE_DIR}/src/CMakeLists.txt" source_cmake)
+if(NOT source_cmake MATCHES "CMAKE_INSTALL_LIBDIR}/aero7")
+    message(FATAL_ERROR "The account helper must install to /usr/lib/aero7 to match the polkit policy")
+endif()

@@ -9,6 +9,7 @@ struct NavigationNode {
     QString icon;
     QString parentId;
     bool selectable = true;
+    bool searchable = true;
 };
 
 namespace NavigationNodes {
@@ -17,4 +18,3 @@ const NavigationNode *find(const QString &id);
 bool isValid(const QString &id);
 QStringList validIds();
 }
-
