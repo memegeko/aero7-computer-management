@@ -13,6 +13,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QSizePolicy>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -25,9 +26,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setWindowTitle("Computer Management"); setWindowIcon(QIcon::fromTheme("computer")); resize(1050,680);
     buildMenus();
-    m_splitter=new QSplitter(this);m_tree=new QTreeWidget(m_splitter);m_pages=new QStackedWidget(m_splitter);m_actions=new QWidget(m_splitter);m_actionsLayout=new QVBoxLayout(m_actions);
-    m_tree->setHeaderLabel("Console Tree");m_tree->setMinimumWidth(210);m_actions->setMinimumWidth(185);m_actions->setMaximumWidth(260);
-    m_splitter->addWidget(m_tree);m_splitter->addWidget(m_pages);m_splitter->addWidget(m_actions);m_splitter->setStretchFactor(1,1);setCentralWidget(m_splitter);
+    m_splitter=new QSplitter(this);m_splitter->setObjectName("managementSplitter");m_tree=new QTreeWidget(m_splitter);m_tree->setObjectName("consoleTree");m_pages=new QStackedWidget(m_splitter);m_pages->setObjectName("managementPages");m_actions=new QWidget(m_splitter);m_actions->setObjectName("actionsPane");m_actionsLayout=new QVBoxLayout(m_actions);
+    m_tree->setHeaderLabel("Console Tree");m_tree->setMinimumWidth(210);m_tree->setMaximumWidth(420);
+    m_actions->setMinimumWidth(185);m_actions->setMaximumWidth(260);
+    // A changing size hint inside a management page must never move the two
+    // navigation dividers. In particular, Performance Monitor updates a long
+    // status line every second. Let only the center pane absorb that change.
+    m_pages->setMinimumWidth(0);
+    m_pages->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Expanding);
+    m_splitter->setChildrenCollapsible(false);
+    m_splitter->addWidget(m_tree);m_splitter->addWidget(m_pages);m_splitter->addWidget(m_actions);
+    m_splitter->setStretchFactor(0,0);m_splitter->setStretchFactor(1,1);m_splitter->setStretchFactor(2,0);
+    m_splitter->setSizes({235,630,185});setCentralWidget(m_splitter);
     connect(m_toggleTree,&QAction::toggled,m_tree,&QWidget::setVisible);
     connect(m_toggleActions,&QAction::toggled,m_actions,&QWidget::setVisible);
     buildTree();

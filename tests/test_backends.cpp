@@ -2,6 +2,7 @@
 #include "backends/SystemdBackend.h"
 #include "backends/SystemInfoBackend.h"
 #include "backends/JournalBackend.h"
+#include "backends/UDisksBackend.h"
 #include "util/Format.h"
 
 #include <QSet>
@@ -50,5 +51,14 @@ int main()
                             << summary.cpu << "' memory='" << summary.memory << "'\n";
         return 7;
     }
+    QByteArray rootMount;
+    rootMount.append('/');
+    rootMount.append('\0');
+    QByteArray dataMount("/mnt/data");
+    dataMount.append('\0');
+    const QStringList mountPoints = UDisksBackend::decodeMountPoints(
+        QVariant::fromValue(QList<QByteArray>{rootMount, dataMount}));
+    if (mountPoints != QStringList({"/", "/mnt/data"}))
+        return 8;
     return 0;
 }

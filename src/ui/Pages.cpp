@@ -1,5 +1,6 @@
 #include "Pages.h"
 
+#include "DiskMapWidget.h"
 #include "PerformanceGraph.h"
 #include "backends/AccountsBackend.h"
 #include "backends/JournalBackend.h"
@@ -20,6 +21,7 @@
 #include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QFileDialog>
+#include <QFrame>
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QGroupBox>
@@ -28,11 +30,16 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
+#include <QSet>
+#include <QSizePolicy>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -642,7 +649,7 @@ public:
     {
         auto *layout=new QVBoxLayout(this);layout->addWidget(heading("Performance Monitor"));
         auto *counterRow=new QHBoxLayout;for(const QString &name:QStringList{"CPU usage","Memory used","Swap used","Disk throughput","Network throughput"}){auto *check=new QCheckBox(name);check->setChecked(name=="CPU usage"||name=="Memory used");m_checks.insert(name,check);counterRow->addWidget(check);connect(check,&QCheckBox::toggled,this,&PerformancePage::updateVisible);}counterRow->addStretch();layout->addLayout(counterRow);
-        m_graph=new PerformanceGraph;layout->addWidget(m_graph);m_values=new QLabel;m_values->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(m_values);
+        m_graph=new PerformanceGraph;layout->addWidget(m_graph);m_values=new QLabel;m_values->setObjectName("performanceSummary");m_values->setTextInteractionFlags(Qt::TextSelectableByMouse);m_values->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);m_values->setMinimumWidth(0);layout->addWidget(m_values);
         connect(&m_watcher,&QFutureWatcher<PerformanceSnapshot>::finished,this,&PerformancePage::sampleReady);m_elapsed.start();auto *timer=new QTimer(this);connect(timer,&QTimer::timeout,this,&PerformancePage::refresh);timer->start(1000);updateVisible();refresh();
     }
     QStringList actions() const override{return{"Refresh","Open Task Manager","Properties"};}
@@ -664,12 +671,281 @@ public:
 
 class DisksPage final : public ManagementPage {
 public:
-    explicit DisksPage(QWidget *parent):ManagementPage("disk-management",parent),m_table(table({"Volume","Layout","Type","File System","Status","Capacity","Free Space","% Free"}))
-    {auto *layout=new QVBoxLayout(this);layout->addWidget(heading("Disk Management"));layout->addWidget(description("Real disk and volume information from UDisks2. Destructive partition changes remain disabled for this milestone."));layout->addWidget(m_table,3);m_layout=new QTreeWidget;m_layout->setHeaderLabels({"Disk / Partition","Capacity","File System","Status"});m_layout->setAlternatingRowColors(true);layout->addWidget(m_layout,2);connect(m_table,&QTableWidget::itemSelectionChanged,this,&DisksPage::announceActions);connect(m_table,&QTableWidget::itemDoubleClicked,this,[this]{properties();});auto *timer=new QTimer(this);connect(timer,&QTimer::timeout,this,&DisksPage::refresh);timer->start(20000);refresh();}
-    QStringList actions()const override{QStringList a{"Refresh","Rescan Disks"};const int r=selectedSourceRow(m_table);if(r>=0&&r<m_devices.size()){const auto&d=m_devices[r];a<<"Properties";if(d.mountable)a<<(d.mountPoint.isEmpty()?"Mount":"Unmount");if(!d.mountPoint.isEmpty())a<<"Open Mount Point";}return a;}
-    void refresh()override{QString error;m_devices=UDisksBackend::devices(&error);m_table->setSortingEnabled(false);m_table->setRowCount(m_devices.size());for(int r=0;r<m_devices.size();++r){const auto&d=m_devices[r];setCell(m_table,r,0,d.label.isEmpty()?d.device:d.label,r);setCell(m_table,r,1,d.partition?"Simple":"Disk");setCell(m_table,r,2,d.removable?"Removable":"Basic");setCell(m_table,r,3,d.fileSystem);setCell(m_table,r,4,d.readOnly?"Read-only":(d.mountPoint.isEmpty()?"Healthy":"Healthy (Mounted)"));setCell(m_table,r,5,Format::bytes(d.size));setCell(m_table,r,6,d.freeBytes?Format::bytes(d.freeBytes):"—");setCell(m_table,r,7,d.size&&d.freeBytes?QString::number(100.0*d.freeBytes/d.size,'f',0)+"%":"—");}m_table->setSortingEnabled(true);m_layout->clear();QMap<QString,QTreeWidgetItem*>drives;int disk=0;for(const auto&d:m_devices){QString key=d.driveObjectPath.isEmpty()?d.objectPath:d.driveObjectPath;if(!drives.contains(key)){auto*root=new QTreeWidgetItem({QString("Disk %1 — %2").arg(disk++).arg(d.driveModel.isEmpty()?d.device:d.driveModel),Format::bytes(d.size),d.partitionTable,d.removable?"Removable":"Online"});m_layout->addTopLevelItem(root);drives.insert(key,root);}if(d.partition){auto*part=new QTreeWidgetItem({QString("Partition %1 — %2").arg(d.partitionNumber).arg(d.label.isEmpty()?d.device:d.label),Format::bytes(d.size),d.fileSystem,d.mountPoint.isEmpty()?"Not mounted":d.mountPoint});drives[key]->addChild(part);}}m_layout->expandAll();emit statusMessage(error.isEmpty()?QString("%1 block device(s)").arg(m_devices.size()):error);announceActions();}
-    void triggerAction(const QString&a)override{if(a=="Refresh"){refresh();return;}if(a=="Rescan Disks"){QStringList errors;for(const auto&d:m_devices)if(!d.partition){QString e;if(!UDisksBackend::rescan(d.objectPath,&e)&&!e.isEmpty())errors<<e;}if(!errors.isEmpty())QMessageBox::warning(this,"Rescan Disks",errors.join('\n'));refresh();return;}const int r=selectedSourceRow(m_table);if(r<0||r>=m_devices.size())return;const auto d=m_devices[r];if(a=="Properties"){properties();return;}if(a=="Open Mount Point"){QDesktopServices::openUrl(QUrl::fromLocalFile(d.mountPoint));return;}QString error;const bool ok=a=="Mount"?UDisksBackend::mount(d.objectPath,&error):UDisksBackend::unmount(d.objectPath,&error);if(!ok)QMessageBox::warning(this,a,error);refresh();}
-private:void properties(){const int r=selectedSourceRow(m_table);if(r<0||r>=m_devices.size())return;const auto d=m_devices[r];showProperties(this,"Disk Properties",{{"Device",d.device},{"Drive model",d.driveModel},{"Serial",d.serial},{"Capacity",Format::bytes(d.size)},{"Partition table",d.partitionTable},{"Partition number",d.partition?QString::number(d.partitionNumber):"—"},{"File system",d.fileSystem},{"Label",d.label},{"UUID",d.uuid},{"PARTUUID",d.partUuid},{"Mount point",d.mountPoint},{"Free space",d.freeBytes?Format::bytes(d.freeBytes):"—"},{"Removable",yesNo(d.removable)},{"Read-only",yesNo(d.readOnly)},{"UDisks2 object",d.objectPath}});}QTableWidget*m_table;QTreeWidget*m_layout;QList<BlockDevice>m_devices;
+    explicit DisksPage(QWidget *parent)
+        : ManagementPage("disk-management", parent),
+          m_table(table({"Volume", "Layout", "Type", "File System", "Status",
+                         "Capacity", "Free Space", "% Free"}))
+    {
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
+        auto *splitter = new QSplitter(Qt::Vertical);
+        splitter->setChildrenCollapsible(false);
+
+        m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+        m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+        m_table->setContextMenuPolicy(Qt::CustomContextMenu);
+        splitter->addWidget(m_table);
+
+        auto *lowerPane = new QWidget;
+        auto *lowerLayout = new QVBoxLayout(lowerPane);
+        lowerLayout->setContentsMargins(0, 0, 0, 0);
+        m_diskMap = new DiskMapWidget;
+        auto *scroll = new QScrollArea;
+        scroll->setWidget(m_diskMap);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::StyledPanel);
+        lowerLayout->addWidget(scroll);
+
+        auto *legend = new QHBoxLayout;
+        auto addLegend = [legend](const QString &color, const QString &text) {
+            auto *swatch = new QLabel;
+            swatch->setFixedSize(14, 9);
+            swatch->setStyleSheet(QString("background:%1;border:1px solid #777;").arg(color));
+            legend->addWidget(swatch);
+            legend->addWidget(new QLabel(text));
+        };
+        addLegend("#103a89", "Primary partition");
+        addLegend("#000000", "Unallocated");
+        legend->addStretch();
+        auto *notice = new QLabel("Partition creation, deletion, formatting, and resizing remain disabled until hardware safety testing is complete.");
+        notice->setStyleSheet("color:#666;");
+        notice->setToolTip("Safe view, rescan, mount, unmount, open, and properties actions use UDisks2.");
+        legend->addWidget(notice);
+        lowerLayout->addLayout(legend);
+        splitter->addWidget(lowerPane);
+        splitter->setStretchFactor(0, 2);
+        splitter->setStretchFactor(1, 3);
+        splitter->setSizes({245, 330});
+        layout->addWidget(splitter);
+
+        connect(m_table, &QTableWidget::itemSelectionChanged, this, [this] {
+            if (m_syncingSelection) return;
+            selectDevice(selectedSourceRow(m_table), false);
+        });
+        connect(m_table, &QTableWidget::itemDoubleClicked, this, [this] { properties(); });
+        connect(m_table, &QWidget::customContextMenuRequested, this, [this](const QPoint &position) {
+            if (QTableWidgetItem *item = m_table->itemAt(position)) {
+                m_table->selectRow(item->row());
+                showContextMenu(m_table->viewport()->mapToGlobal(position));
+            }
+        });
+        connect(m_diskMap, &DiskMapWidget::selectionChanged, this, [this](int index) {
+            selectDevice(index, true);
+        });
+        connect(m_diskMap, &DiskMapWidget::deviceActivated, this, [this](int index) {
+            selectDevice(index, true);
+            properties();
+        });
+        connect(m_diskMap, &DiskMapWidget::contextMenuRequested, this,
+                [this](int index, const QPoint &globalPosition) {
+            selectDevice(index, true);
+            showContextMenu(globalPosition);
+        });
+        auto *timer = new QTimer(this);
+        connect(timer, &QTimer::timeout, this, &DisksPage::refresh);
+        timer->start(20000);
+        refresh();
+    }
+
+    QStringList actions() const override
+    {
+        QStringList result{"Refresh", "Rescan Disks"};
+        const BlockDevice *device = selectedDevice();
+        if (!device) return result;
+        result << "Properties";
+        if (device->mountable)
+            result << (device->mountPoint.isEmpty() ? "Mount" : "Unmount");
+        if (!device->mountPoint.isEmpty()) result << "Open Mount Point";
+        return result;
+    }
+
+    void refresh() override
+    {
+        const QString selectedPath = selectedDevice() ? selectedDevice()->objectPath : QString{};
+        QString error;
+        m_devices = UDisksBackend::devices(&error);
+        m_volumeIndexes.clear();
+        for (int index = 0; index < m_devices.size(); ++index) {
+            const BlockDevice &device = m_devices[index];
+            if (device.partition || device.mountable || !device.fileSystem.isEmpty())
+                m_volumeIndexes << index;
+        }
+
+        m_syncingSelection = true;
+        m_table->setSortingEnabled(false);
+        m_table->setRowCount(m_volumeIndexes.size());
+        for (int row = 0; row < m_volumeIndexes.size(); ++row) {
+            const int index = m_volumeIndexes[row];
+            const BlockDevice &device = m_devices[index];
+            setCell(m_table, row, 0, displayName(device), index);
+            setCell(m_table, row, 1, device.partition ? "Simple" : "Simple");
+            setCell(m_table, row, 2, device.removable ? "Removable" : "Basic");
+            setCell(m_table, row, 3, device.fileSystem);
+            setCell(m_table, row, 4, status(device));
+            setCell(m_table, row, 5, Format::bytes(device.size));
+            setCell(m_table, row, 6, device.freeSpaceKnown ? Format::bytes(device.freeBytes) : "—");
+            setCell(m_table, row, 7, device.freeSpaceKnown && device.size
+                ? QString::number(100.0 * device.freeBytes / device.size, 'f', 0) + '%' : "—");
+        }
+        m_table->setSortingEnabled(true);
+        m_diskMap->setDevices(m_devices);
+
+        m_selectedDeviceIndex = -1;
+        if (!selectedPath.isEmpty()) {
+            for (int index = 0; index < m_devices.size(); ++index) {
+                if (m_devices[index].objectPath == selectedPath) {
+                    m_selectedDeviceIndex = index;
+                    break;
+                }
+            }
+        }
+        if (m_selectedDeviceIndex >= 0) {
+            m_diskMap->selectDevice(m_selectedDeviceIndex);
+            selectTableRow(m_selectedDeviceIndex);
+        } else {
+            m_table->clearSelection();
+            m_diskMap->selectDevice(-1);
+        }
+        m_syncingSelection = false;
+        emit statusMessage(error.isEmpty()
+            ? QString("%1 disk and volume object(s) — UDisks2").arg(m_devices.size()) : error);
+        announceActions();
+    }
+
+    void triggerAction(const QString &action) override
+    {
+        if (action == "Refresh") {
+            refresh();
+            return;
+        }
+        if (action == "Rescan Disks") {
+            QStringList errors;
+            QSet<QString> rescanned;
+            for (const BlockDevice &device : std::as_const(m_devices)) {
+                if (device.partition || rescanned.contains(device.objectPath)) continue;
+                rescanned.insert(device.objectPath);
+                QString error;
+                if (!UDisksBackend::rescan(device.objectPath, &error) && !error.isEmpty())
+                    errors << QString("%1: %2").arg(device.device, error);
+            }
+            if (!errors.isEmpty()) QMessageBox::warning(this, "Rescan Disks", errors.join('\n'));
+            refresh();
+            return;
+        }
+        const BlockDevice *device = selectedDevice();
+        if (!device) return;
+        const QString objectPath = device->objectPath;
+        if (action == "Properties") {
+            properties();
+            return;
+        }
+        if (action == "Open Mount Point") {
+            if (device->mountPoint.isEmpty()
+                || !QDesktopServices::openUrl(QUrl::fromLocalFile(device->mountPoint)))
+                QMessageBox::warning(this, action, "The selected volume has no accessible mount point.");
+            return;
+        }
+        QString error;
+        bool succeeded = false;
+        if (action == "Mount") succeeded = UDisksBackend::mount(objectPath, &error);
+        else if (action == "Unmount") succeeded = UDisksBackend::unmount(objectPath, &error);
+        if (!succeeded && !error.isEmpty()) QMessageBox::warning(this, action, error);
+        refresh();
+    }
+
+private:
+    static QString displayName(const BlockDevice &device)
+    {
+        return device.label.isEmpty() ? device.device : device.label;
+    }
+
+    static QString status(const BlockDevice &device)
+    {
+        if (device.readOnly) return "Healthy (Read-only)";
+        if (device.mountPoint == "/") return "Healthy (System, Mounted)";
+        if (device.mountPoint == "/boot" || device.mountPoint == "/boot/efi")
+            return "Healthy (EFI System Partition)";
+        if (!device.mountPoint.isEmpty()) return "Healthy (Mounted)";
+        return "Healthy";
+    }
+
+    const BlockDevice *selectedDevice() const
+    {
+        return m_selectedDeviceIndex >= 0 && m_selectedDeviceIndex < m_devices.size()
+            ? &m_devices[m_selectedDeviceIndex] : nullptr;
+    }
+
+    void selectDevice(int deviceIndex, bool syncTable)
+    {
+        if (deviceIndex < 0 || deviceIndex >= m_devices.size()) return;
+        m_selectedDeviceIndex = deviceIndex;
+        m_diskMap->selectDevice(deviceIndex);
+        if (syncTable) {
+            m_syncingSelection = true;
+            selectTableRow(deviceIndex);
+            m_syncingSelection = false;
+        }
+        announceActions();
+    }
+
+    void selectTableRow(int deviceIndex)
+    {
+        m_table->clearSelection();
+        for (int row = 0; row < m_table->rowCount(); ++row) {
+            const QTableWidgetItem *item = m_table->item(row, 0);
+            if (item && item->data(Qt::UserRole).toInt() == deviceIndex) {
+                m_table->selectRow(row);
+                m_table->scrollToItem(item);
+                return;
+            }
+        }
+    }
+
+    void showContextMenu(const QPoint &globalPosition)
+    {
+        QMenu menu(this);
+        const QStringList available = actions();
+        for (const QString &action : available) {
+            if (action == "Refresh" || action == "Rescan Disks") continue;
+            QAction *entry = menu.addAction(action);
+            connect(entry, &QAction::triggered, this, [this, action] { triggerAction(action); });
+        }
+        if (!menu.actions().isEmpty()) menu.addSeparator();
+        QAction *refreshAction = menu.addAction("Refresh");
+        connect(refreshAction, &QAction::triggered, this, [this] { refresh(); });
+        menu.exec(globalPosition);
+    }
+
+    void properties()
+    {
+        const BlockDevice *device = selectedDevice();
+        if (!device) return;
+        showProperties(this, displayName(*device) + " Properties",
+            {{"Device", device->device},
+             {"Drive", QString("%1 %2").arg(device->driveVendor, device->driveModel).trimmed()},
+             {"Connection", device->connectionBus},
+             {"Serial", device->serial},
+             {"Capacity", Format::bytes(device->size)},
+             {"Partition table", device->partitionTable},
+             {"Partition number", device->partition ? QString::number(device->partitionNumber) : "—"},
+             {"File system", device->fileSystem},
+             {"Label", device->label},
+             {"UUID", device->uuid},
+             {"PARTUUID", device->partUuid},
+             {"Mount point", device->mountPoints.join(", ")},
+             {"Free space", device->freeSpaceKnown ? Format::bytes(device->freeBytes) : "—"},
+             {"System device", yesNo(device->systemDevice)},
+             {"Removable", yesNo(device->removable)},
+             {"Read-only", yesNo(device->readOnly)},
+             {"UDisks2 object", device->objectPath}});
+    }
+
+    QTableWidget *m_table = nullptr;
+    DiskMapWidget *m_diskMap = nullptr;
+    QList<BlockDevice> m_devices;
+    QList<int> m_volumeIndexes;
+    int m_selectedDeviceIndex = -1;
+    bool m_syncingSelection = false;
 };
 
 class ServicesPage final : public ManagementPage {

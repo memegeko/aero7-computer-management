@@ -2,12 +2,15 @@
 
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
+#include <QDBusArgument>
 #include <QDBusInterface>
 #include <QDBusObjectPath>
 #include <QDBusReply>
+#include <QHash>
 #include <QStorageInfo>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 QVariantMap properties(const QString &path, const QString &interface)
@@ -23,15 +26,6 @@ QString decodedBytes(const QVariant &value)
     QByteArray bytes = value.toByteArray();
     if (!bytes.isEmpty() && bytes.endsWith('\0')) bytes.chop(1);
     return QString::fromLocal8Bit(bytes);
-}
-
-QString firstMountPoint(const QVariant &value)
-{
-    const QList<QByteArray> mounts = value.value<QList<QByteArray>>();
-    if (mounts.isEmpty()) return {};
-    QByteArray path = mounts.first();
-    if (path.endsWith('\0')) path.chop(1);
-    return QString::fromLocal8Bit(path);
 }
 
 bool interfaceCall(const QString &path, const QString &interface, const QString &method,
@@ -50,6 +44,20 @@ bool interfaceCall(const QString &path, const QString &interface, const QString 
     }
     return true;
 }
+}
+
+QStringList UDisksBackend::decodeMountPoints(const QVariant &value)
+{
+    // UDisks2 exposes MountPoints as D-Bus signature aay. Depending on the
+    // QtDBus path used to obtain the property this arrives either as the
+    // native QList<QByteArray> or as a QDBusArgument. qdbus_cast handles both.
+    const QList<QByteArray> mounts = qdbus_cast<QList<QByteArray>>(value);
+    QStringList result;
+    for (QByteArray path : mounts) {
+        if (path.endsWith('\0')) path.chop(1);
+        if (!path.isEmpty()) result << QString::fromLocal8Bit(path);
+    }
+    return result;
 }
 
 bool UDisksBackend::available()
@@ -85,12 +93,17 @@ QList<BlockDevice> UDisksBackend::devices(QString *error)
         device.fileSystem = block.value("IdType").toString();
         device.uuid = block.value("IdUUID").toString();
         device.readOnly = block.value("ReadOnly").toBool();
+        device.systemDevice = block.value("HintSystem").toBool();
         device.size = block.value("Size").toULongLong();
         device.mountable = !filesystem.isEmpty();
-        device.mountPoint = firstMountPoint(filesystem.value("MountPoints"));
+        device.mountPoints = decodeMountPoints(filesystem.value("MountPoints"));
+        device.mountPoint = device.mountPoints.value(0);
         if (!device.mountPoint.isEmpty()) {
             const QStorageInfo storage(device.mountPoint);
-            if (storage.isValid()) device.freeBytes = storage.bytesAvailable();
+            if (storage.isValid()) {
+                device.freeBytes = storage.bytesAvailable();
+                device.freeSpaceKnown = true;
+            }
         }
         device.partition = !partition.isEmpty();
         device.partitionNumber = partition.value("Number").toUInt();
@@ -102,11 +115,23 @@ QList<BlockDevice> UDisksBackend::devices(QString *error)
         if (!device.driveObjectPath.isEmpty() && device.driveObjectPath != "/") {
             const QVariantMap driveProperties = properties(device.driveObjectPath, "org.freedesktop.UDisks2.Drive");
             device.driveModel = driveProperties.value("Model").toString().trimmed();
+            device.driveVendor = driveProperties.value("Vendor").toString().trimmed();
+            device.connectionBus = driveProperties.value("ConnectionBus").toString().trimmed();
             device.serial = driveProperties.value("Serial").toString().trimmed();
+            device.optical = driveProperties.value("Optical").toBool();
             device.removable = driveProperties.value("Removable").toBool()
                 || driveProperties.value("MediaRemovable").toBool();
         }
         result << device;
+    }
+    QHash<QString, QString> partitionTables;
+    for (const BlockDevice &device : std::as_const(result)) {
+        if (!device.partition && !device.partitionTable.isEmpty())
+            partitionTables.insert(device.driveObjectPath, device.partitionTable);
+    }
+    for (BlockDevice &device : result) {
+        if (device.partition && device.partitionTable.isEmpty())
+            device.partitionTable = partitionTables.value(device.driveObjectPath);
     }
     std::sort(result.begin(), result.end(), [](const BlockDevice &a, const BlockDevice &b) {
         if (a.driveObjectPath != b.driveObjectPath) return a.driveObjectPath < b.driveObjectPath;

@@ -15,14 +15,20 @@ add_library(aero7-compmgmt-core STATIC ${CORE_SOURCES})
 target_include_directories(aero7-compmgmt-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(aero7-compmgmt-core PUBLIC Qt6::Widgets Qt6::DBus)
 
-add_executable(aero7-compmgmt
-    main.cpp
+set(UI_SOURCES
     ui/MainWindow.cpp
     ui/ManagementPage.cpp
+    ui/DiskMapWidget.cpp
     ui/PerformanceGraph.cpp
     ui/Pages.cpp
 )
-target_link_libraries(aero7-compmgmt PRIVATE aero7-compmgmt-core Qt6::Concurrent)
+
+add_library(aero7-compmgmt-ui STATIC ${UI_SOURCES})
+target_include_directories(aero7-compmgmt-ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(aero7-compmgmt-ui PUBLIC aero7-compmgmt-core Qt6::Concurrent)
+
+add_executable(aero7-compmgmt main.cpp)
+target_link_libraries(aero7-compmgmt PRIVATE aero7-compmgmt-ui)
 
 add_executable(aero7-compmgmt-helper helper/main.cpp)
 target_link_libraries(aero7-compmgmt-helper PRIVATE Qt6::Core)
