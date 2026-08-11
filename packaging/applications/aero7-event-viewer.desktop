@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Event Viewer
+Comment=View system and application events
+Exec=aero7-compmgmt --open event-viewer
+Icon=view-list-details
+Categories=System;Settings;
+Keywords=event;viewer;log;journal;errors;warnings;
+StartupNotify=true

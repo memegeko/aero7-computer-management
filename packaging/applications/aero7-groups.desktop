@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Groups
+Comment=View and manage local groups
+Exec=aero7-compmgmt --open groups
+Icon=system-users
+Categories=System;Settings;
+Keywords=group;groups;permissions;members;local;
+StartupNotify=true

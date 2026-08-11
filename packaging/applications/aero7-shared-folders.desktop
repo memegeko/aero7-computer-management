@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Shared Folders
+Comment=View and manage shared folders
+Exec=aero7-compmgmt --open shared-folders
+Icon=folder-network
+Categories=System;Settings;
+Keywords=share;shared;folder;network;samba;
+StartupNotify=true

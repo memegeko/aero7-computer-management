@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Local Users and Groups
+Comment=Manage local user and group accounts
+Exec=aero7-compmgmt --open local-users-groups
+Icon=system-users
+Categories=System;Settings;
+Keywords=local;users;groups;accounts;permissions;
+StartupNotify=true

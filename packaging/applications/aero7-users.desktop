@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Users
+Comment=View and manage local users
+Exec=aero7-compmgmt --open users
+Icon=user-identity
+Categories=System;Settings;
+Keywords=user;users;account;accounts;local;
+StartupNotify=true

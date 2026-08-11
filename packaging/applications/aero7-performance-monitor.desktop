@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Performance Monitor
+Comment=Monitor system performance and resources
+Exec=aero7-compmgmt --open performance
+Icon=utilities-system-monitor
+Categories=System;Settings;
+Keywords=performance;monitor;cpu;memory;resources;graph;
+StartupNotify=true

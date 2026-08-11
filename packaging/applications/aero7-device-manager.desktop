@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Device Manager
+Comment=View and manage hardware devices
+Exec=aero7-compmgmt --open device-manager
+Icon=preferences-system-devices
+Categories=System;Settings;
+Keywords=device;devices;hardware;drivers;manager;
+StartupNotify=true

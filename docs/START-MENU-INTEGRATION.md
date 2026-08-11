@@ -1,7 +1,7 @@
 # Start-menu search integration
 
-Computer Management owns its search catalog. It does not add entries to Aero7
-Control Panel and does not require Control Panel to route its pages.
+Computer Management is a separate application. It does not add entries to
+Aero7 Control Panel and does not require Control Panel to route its pages.
 
 ```console
 aero7-compmgmt --list-settings-json
@@ -15,21 +15,22 @@ from that command and launch a selected result with:
 aero7-compmgmt --open event-viewer
 ```
 
-Only `aero7-computer-management.desktop` is installed as a normal application
-shortcut. The page entries remain search results rather than separate items
-in All Programs.
+The main console and every selectable management page install normal desktop
+entries. This puts them in the Start menu's Applications section, makes them
+searchable through the standard applications runner, and gives each page its
+matching Aero-compatible system icon. Opening a page entry launches the main
+console directly at that page.
 
-| Search result | Stable ID |
-|---|---|
-| Computer Management | `overview` |
-| Task Scheduler | `task-scheduler` |
-| Event Viewer | `event-viewer` |
-| Shared Folders | `shared-folders` |
-| Local Users and Groups | `local-users-groups` |
-| Users | `users` |
-| Groups | `groups` |
-| Performance Monitor | `performance` |
-| Device Manager | `device-manager` |
-| Disk Management | `disk-management` |
-| Services | `services` |
-
+| Application | Stable ID | Theme icon |
+|---|---|---|
+| Computer Management | `overview` | `computer` |
+| Task Scheduler | `task-scheduler` | `appointment-new` |
+| Event Viewer | `event-viewer` | `view-list-details` |
+| Shared Folders | `shared-folders` | `folder-network` |
+| Local Users and Groups | `local-users-groups` | `system-users` |
+| Users | `users` | `user-identity` |
+| Groups | `groups` | `system-users` |
+| Performance Monitor | `performance` | `utilities-system-monitor` |
+| Device Manager | `device-manager` | `preferences-system-devices` |
+| Disk Management | `disk-management` | `drive-harddisk` |
+| Services | `services` | `preferences-system-services` |

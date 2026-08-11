@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Disk Management
+Comment=View disks, partitions, and storage volumes
+Exec=aero7-compmgmt --open disk-management
+Icon=drive-harddisk
+Categories=System;Settings;
+Keywords=disk;drive;partition;volume;storage;udisks;
+StartupNotify=true

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Services
+Comment=View and manage system services
+Exec=aero7-compmgmt --open services
+Icon=preferences-system-services
+Categories=System;Settings;
+Keywords=service;services;daemon;systemd;unit;
+StartupNotify=true

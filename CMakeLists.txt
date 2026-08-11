@@ -17,3 +17,6 @@ add_subdirectory(tests)
 install(FILES packaging/aero7-computer-management.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 
+install(DIRECTORY packaging/applications/
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+        FILES_MATCHING PATTERN "*.desktop")

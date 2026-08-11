@@ -13,3 +13,9 @@ set_tests_properties(cli-settings-json PROPERTIES
 add_test(NAME cli-invalid-node COMMAND aero7-compmgmt --open not-a-real-node)
 set_tests_properties(cli-invalid-node PROPERTIES WILL_FAIL TRUE
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_test(
+    NAME desktop-entries
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/validate_desktop_entries.cmake)

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Task Scheduler
+Comment=Create and manage scheduled system tasks
+Exec=aero7-compmgmt --open task-scheduler
+Icon=appointment-new
+Categories=System;Settings;
+Keywords=task;schedule;scheduler;timer;systemd;automation;
+StartupNotify=true

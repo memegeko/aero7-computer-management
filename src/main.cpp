@@ -11,7 +11,7 @@
 
 int main(int argc,char **argv)
 {
-    QApplication app(argc,argv);app.setOrganizationName("Aero7");app.setApplicationName("ComputerManagement");app.setApplicationDisplayName("Computer Management");app.setWindowIcon(QIcon::fromTheme("computer"));
+    QApplication app(argc,argv);app.setOrganizationName("Aero7");app.setApplicationName("ComputerManagement");app.setApplicationDisplayName("Computer Management");app.setDesktopFileName("aero7-computer-management");app.setWindowIcon(QIcon::fromTheme("computer"));
     QCommandLineParser parser;parser.setApplicationDescription("Aero7 Computer Management console");parser.addHelpOption();parser.addVersionOption();
     QCommandLineOption open({"o","open"},"Open a management page by stable node ID.","node");parser.addOption(open);
     QCommandLineOption listSettings("list-settings-json","Print the standalone Start-menu search catalog as JSON and exit.");
