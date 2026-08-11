@@ -7,7 +7,9 @@
 int main()
 {
     const auto timers = SystemdBackend::parseTimers(
-        "Tue 2026-08-11 18:00:00 CEST  9min left  Tue 2026-08-11 17:00:00 CEST  50min ago  pkg.timer  pkg.service\n");
+        "[{\"next\":1786467600000000,\"left\":1786467600000000,"
+        "\"last\":1786464000000000,\"passed\":0,"
+        "\"unit\":\"pkg.timer\",\"activates\":\"pkg.service\"}]");
     if (timers.size() != 1 || timers.first().unit != "pkg.timer"
         || timers.first().activates != "pkg.service")
         return 1;
@@ -33,4 +35,3 @@ int main()
     }
     return 0;
 }
-

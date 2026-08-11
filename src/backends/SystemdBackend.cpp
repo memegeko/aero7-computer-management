@@ -1,5 +1,9 @@
 #include "SystemdBackend.h"
 
+#include <QDateTime>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QRegularExpression>
 
@@ -19,7 +23,7 @@ QString SystemdBackend::run(const QStringList &arguments, QString *error)
 
 QList<TimerInfo> SystemdBackend::timers(QString *error)
 {
-    return parseTimers(run({"list-timers", "--all", "--no-legend", "--no-pager"}, error));
+    return parseTimers(run({"list-timers", "--all", "--no-pager", "--output=json"}, error));
 }
 
 QList<ServiceInfo> SystemdBackend::services(QString *error)
@@ -30,6 +34,25 @@ QList<ServiceInfo> SystemdBackend::services(QString *error)
 QList<TimerInfo> SystemdBackend::parseTimers(const QString &text)
 {
     QList<TimerInfo> out;
+    const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8());
+    if (document.isArray()) {
+        const QDateTime now = QDateTime::currentDateTime();
+        for (const QJsonValue &value : document.array()) {
+            const QJsonObject object = value.toObject();
+            const qint64 nextMicros = object.value("next").toVariant().toLongLong();
+            const qint64 lastMicros = object.value("last").toVariant().toLongLong();
+            const QDateTime next = QDateTime::fromMSecsSinceEpoch(nextMicros / 1000);
+            const QDateTime last = QDateTime::fromMSecsSinceEpoch(lastMicros / 1000);
+            const qint64 seconds = now.secsTo(next);
+            out.push_back({
+                nextMicros > 0 ? next.toString("yyyy-MM-dd HH:mm:ss") : QString("-"),
+                seconds >= 0 ? QString("%1 min").arg(seconds / 60) : QString("-"),
+                lastMicros > 0 ? last.toString("yyyy-MM-dd HH:mm:ss") : QString("-"),
+                {}, object.value("unit").toString(), object.value("activates").toString()
+            });
+        }
+        return out;
+    }
     const QRegularExpression spaces("\\s{2,}");
     for (const QString &line : text.split('\n', Qt::SkipEmptyParts)) {
         const QStringList columns = line.trimmed().split(spaces);
@@ -52,4 +75,3 @@ QList<ServiceInfo> SystemdBackend::parseServices(const QString &text)
     }
     return out;
 }
-
