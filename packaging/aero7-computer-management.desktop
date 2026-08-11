@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Computer Management
+Comment=Manage system tools, storage, devices, and services
+Exec=aero7-compmgmt
+Icon=computer
+Categories=System;Settings;
+Keywords=computer;management;administration;services;disks;events;users;
+StartupNotify=true
+
