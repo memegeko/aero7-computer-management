@@ -26,7 +26,14 @@ Every page has a stable command-line deep link, for example:
 aero7-compmgmt --open event-viewer
 ```
 
-These IDs are also used by Aero7 Control Panel and Start-menu Settings search.
+The app can publish these pages as a self-contained JSON search catalog:
+
+```console
+aero7-compmgmt --list-settings-json
+```
+
+The Aero7 Start menu can consume that catalog without routing the pages
+through Control Panel. See `docs/START-MENU-INTEGRATION.md`.
 
 ## Build
 
@@ -42,4 +49,3 @@ DBus. See `docs/TESTING.md` for backend-specific test notes.
 ## License
 
 MIT. See [LICENSE](LICENSE) and [THIRD_PARTY.md](THIRD_PARTY.md).
-
