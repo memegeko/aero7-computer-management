@@ -92,18 +92,23 @@ int main()
         return 10;
     if (UDisksBackend::adjacentFreeRegion(layout, second)->offset != gaps[1].offset)
         return 11;
+    BlockDevice optical;
+    optical.optical = true;
+    if (UDisksBackend::isDiskManagementDevice(optical)
+        || !UDisksBackend::isDiskManagementDevice(disk))
+        return 12;
     const DiskOperationTarget target = UDisksBackend::targetFor(first);
     if (target.objectPath != first.objectPath || target.deviceNumber != first.deviceNumber
         || !target.partition || target.offset != first.partitionOffset)
-        return 12;
+        return 13;
     if (UDisksBackend::available()) {
         QString capabilityError;
         const auto capabilities = UDisksBackend::fileSystemCapabilities(&capabilityError);
-        if (capabilities.isEmpty() || !capabilityError.isEmpty()) return 13;
+        if (capabilities.isEmpty() || !capabilityError.isEmpty()) return 14;
         bool foundExt4 = false;
         for (const auto &capability : capabilities)
             if (capability.type == "ext4") foundExt4 = true;
-        if (!foundExt4) return 14;
+        if (!foundExt4) return 15;
     }
     return 0;
 }

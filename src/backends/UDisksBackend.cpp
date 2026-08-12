@@ -385,12 +385,23 @@ QList<BlockDevice> UDisksBackend::devices(QString *error)
             || criticalTables.contains(device.partitionTableObjectPath))
             device.critical = true;
     }
+    result.erase(std::remove_if(result.begin(), result.end(), [](const BlockDevice &device) {
+        return !UDisksBackend::isDiskManagementDevice(device);
+    }), result.end());
     std::sort(result.begin(), result.end(), [](const BlockDevice &a, const BlockDevice &b) {
         if (a.driveObjectPath != b.driveObjectPath) return a.driveObjectPath < b.driveObjectPath;
         if (a.partition != b.partition) return !a.partition;
         return a.partitionOffset < b.partitionOffset;
     });
     return result;
+}
+
+bool UDisksBackend::isDiskManagementDevice(const BlockDevice &device)
+{
+    // Optical media belongs in File Explorer, not in the fixed/removable disk map.
+    // UDisks exposes a virtual CD/DVD drive even when no ISO is attached, which
+    // otherwise looks like a misleading zero-byte uninitialized hard disk.
+    return !device.optical;
 }
 
 bool UDisksBackend::mount(const QString &objectPath, QString *error)

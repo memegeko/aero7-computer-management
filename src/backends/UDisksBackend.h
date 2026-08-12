@@ -114,6 +114,7 @@ public:
     static QStringList decodeMountPoints(const QVariant &value);
     static bool available();
     static QList<BlockDevice> devices(QString *error = nullptr);
+    static bool isDiskManagementDevice(const BlockDevice &device);
     static bool mount(const QString &objectPath, QString *error = nullptr);
     static bool unmount(const QString &objectPath, QString *error = nullptr);
     static bool rescan(const QString &objectPath, QString *error = nullptr);
