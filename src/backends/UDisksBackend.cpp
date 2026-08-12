@@ -62,6 +62,10 @@ bool interfaceCall(const QString &path, const QString &interface, const QString 
 {
     QDBusInterface object("org.freedesktop.UDisks2", path, interface,
                           QDBusConnection::systemBus());
+    // Mount and unmount can wait for a Polkit agent. QDBusInterface otherwise
+    // uses its short default timeout, which can expire while the user is still
+    // reading or answering the administrator prompt.
+    object.setTimeout(300000);
     if (!object.isValid()) {
         if (error) *error = QString("This item has no %1 interface.").arg(interface.section('.', -1));
         return false;
@@ -100,6 +104,9 @@ QString humanError(const QString &message)
         return "The volume is busy. Close files and applications using it, then try again.";
     if (message.contains("read-only", Qt::CaseInsensitive))
         return "The selected disk is read-only.";
+    if (message.contains("Did not receive a reply", Qt::CaseInsensitive)
+        || message.contains("timed out", Qt::CaseInsensitive))
+        return "The authorization request timed out before the disk operation completed.";
     return message.trimmed().isEmpty() ? "The disk operation failed." : message.trimmed();
 }
 
@@ -683,10 +690,21 @@ DiskOperationResult UDisksBackend::formatVolume(const FormatVolumeRequest &reque
     }
     BlockDevice refreshed;
     if (!waitForDevice(volume.objectPath, &refreshed, &error, 12000,
-            [&request](const BlockDevice &current) {
-                return current.fileSystem.compare(request.fileSystem, Qt::CaseInsensitive) == 0;
+            [&request, &volume](const BlockDevice &current) {
+                const bool fileSystemMatches =
+                    current.fileSystem.compare(request.fileSystem, Qt::CaseInsensitive) == 0;
+                const bool labelMatches = request.label.trimmed().isEmpty()
+                    ? current.label.isEmpty()
+                    : current.label.compare(request.label.trimmed(), Qt::CaseInsensitive) == 0;
+                // Reformatting a filesystem of the same type can otherwise look
+                // successful even when UDisks never changed the on-disk data.
+                const bool identityChanged = volume.uuid.isEmpty()
+                    ? !current.uuid.isEmpty()
+                    : !current.uuid.isEmpty() && current.uuid != volume.uuid;
+                return fileSystemMatches && labelMatches && identityChanged;
             })) {
-        result.message = "Formatting returned, but the requested filesystem was not detected.";
+        result.message = "Formatting returned, but the new filesystem identity, type, and label "
+                         "could not all be verified.";
         return result;
     }
     if (wasMounted && request.remount) {

@@ -60,3 +60,22 @@ Useful direct launches:
 Never exercise destructive tests on the installed Aero7 system disk or a host
 data disk. The ISO repository's `--disk-management-fixture` QEMU option creates
 disposable blank/partitioned secondary disks specifically for this matrix.
+
+### Verified disposable-disk workflow (2026-08-12)
+
+The multi-disk fixture was used to verify the following real UDisks2 path:
+
+- Disk 1 (`/dev/vdb`) started as an 8 GiB blank disk; the installed Aero7
+  system remained on protected Disk 0 (`/dev/vda`).
+- GPT initialization produced an empty partition table and a fully
+  unallocated disk.
+- New Simple Volume created a 4 GiB ext4 partition labelled `TESTDATA`,
+  leaving 4 GiB unallocated, and the result was checked with `lsblk` and
+  `blkid`.
+- Format changed the filesystem UUID and label to `reformatted`, then
+  remounted it at the UDisks2-managed user-media path.
+- Extend Volume added 2048 MiB. The partition became exactly 6 GiB, ext4 grew
+  to 1,572,864 4096-byte blocks, the mount stayed usable, and 2 GiB remained
+  unallocated.
+- Keeping the New Simple Volume wizard open across the periodic refresh timer
+  no longer invalidates its disk target or crashes the process.
