@@ -115,7 +115,16 @@ void MainWindow::showActions(const QStringList &actions)
 {
     m_properties->setEnabled(actions.contains("Properties"));
     m_actionMenu->clear();
-    while(auto *item=m_actionsLayout->takeAt(0)){if(item->widget())item->widget()->deleteLater();delete item;}
+    while(auto *item=m_actionsLayout->takeAt(0)){
+        if(auto *widget=item->widget()){
+            // deleteLater() alone leaves the old controls visible at their previous
+            // geometry until the next event-loop turn, so rapid selection changes
+            // make multiple generations of links appear on top of each other.
+            widget->hide();
+            widget->deleteLater();
+        }
+        delete item;
+    }
     auto *title=new QLabel("Actions");QFont f=title->font();f.setBold(true);title->setFont(f);m_actionsLayout->addWidget(title);
     for(const QString &name:actions){
         auto *menuAction=m_actionMenu->addAction(name);connect(menuAction,&QAction::triggered,this,[this,name]{if(m_currentPage)m_currentPage->triggerAction(name);});
