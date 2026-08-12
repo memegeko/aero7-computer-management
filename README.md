@@ -32,7 +32,8 @@ Microsoft group of companies.**
 > [!NOTE]
 > Aero7 Computer Management is under active development. Read-only inspection
 > and normal service actions are available now. Destructive partition editing
-> remains disabled until it completes dedicated hardware testing.
+> is restricted to explicit, confirmed operations on non-critical disks and
+> should still be exercised on disposable media before real data disks.
 
 ## About the project
 
@@ -57,7 +58,7 @@ it.
 | Local Users and Groups | Linux accounts and groups | View accounts and groups and perform authenticated standard account operations |
 | Performance Monitor | `/proc` and `/sys` | Live CPU, memory, swap, disk, network, process, and context-switch graphs with stable navigation panes |
 | Device Manager | [linux-devmgmt](https://github.com/memegeko/linux-devmgmt) | Open the complete device tree or jump directly to a searchable hardware category |
-| Disk Management | UDisks2 | Windows 7-style disk map, real volume information, properties, rescan, mount, unmount, and open mount point |
+| Disk Management | UDisks2 | Classic disk map, GPT/MBR initialization, simple-volume creation, formatting, extension, mount/unmount, rescan, and properties |
 | Services | systemd | View system and user services, dependencies and logs, and perform service lifecycle actions |
 
 ### Disk Management
@@ -68,8 +69,10 @@ file systems, capacity, free space, partition state, and removable media come
 from UDisks2.
 
 Safe actions such as refresh, rescan, properties, mount, unmount, and opening a
-mount point are available. Creating, deleting, formatting, and resizing
-partitions remain intentionally unavailable in this development milestone.
+mount point are available. Initialize Disk, New Simple Volume, Format, and
+Extend Volume use classic wizard flows with real UDisks2 operations. Deleting,
+shrinking, dynamic-disk spanning, and RAID-5 volume creation remain
+intentionally unavailable in this development milestone.
 
 ### Start-menu integration
 

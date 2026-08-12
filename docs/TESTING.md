@@ -34,8 +34,14 @@ Run the GUI as the normal desktop user. Do not start it with `sudo`.
   network counters update once per second.
 - Device Manager launches `devmgmt` when installed and reports its absence
   without crashing otherwise.
-- Disk Management lists physical disks and volumes, Properties works, and a
-  non-system test volume can be mounted/unmounted through UDisks2.
+- Disk Management lists physical disks, partitions, and unallocated extents.
+  On disposable secondary VM disks, test blank GPT and MBR initialization,
+  full and partial New Simple Volumes, every available filesystem, mount/no
+  mount, reformat, partial/full extension, and cancellation at every page.
+  Validate each result with `lsblk`, `blkid`, and UDisks2—not only the UI.
+- Confirm Format and Extend are unavailable for the Aero7 root/boot disk and
+  that stale identity, read-only, busy, missing-tool, and no-adjacent-space
+  errors are human-readable.
 - Services lists system and user services; Properties includes dependencies
   and logs. Test lifecycle/unit-file actions only on a disposable service.
 
@@ -51,5 +57,6 @@ Useful direct launches:
 ./build/src/aero7-compmgmt --open services
 ```
 
-Disk creation, deletion, formatting, and resizing are intentionally absent
-from this milestone. Test only mount/unmount against non-system media.
+Never exercise destructive tests on the installed Aero7 system disk or a host
+data disk. The ISO repository's `--disk-management-fixture` QEMU option creates
+disposable blank/partitioned secondary disks specifically for this matrix.

@@ -19,6 +19,7 @@ set(UI_SOURCES
     ui/MainWindow.cpp
     ui/ManagementPage.cpp
     ui/DiskMapWidget.cpp
+    ui/DiskDialogs.cpp
     ui/PerformanceGraph.cpp
     ui/Pages.cpp
 )

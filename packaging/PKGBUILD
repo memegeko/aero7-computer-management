@@ -5,10 +5,14 @@ pkgdesc='Aero7-native Computer Management console for Linux'
 arch=('x86_64')
 url='https://github.com/memegeko/aero7-computer-management'
 license=('MIT')
-depends=('qt6-base' 'systemd' 'udisks2' 'polkit' 'shadow')
+depends=('qt6-base' 'systemd' 'udisks2' 'polkit' 'shadow' 'dosfstools' 'e2fsprogs')
 makedepends=('cmake' 'ninja' 'git')
 optdepends=('samba: Shared Folders status'
-            'linux-devmgmt: Device Manager integration')
+            'linux-devmgmt: Device Manager integration'
+            'ntfs-3g: create and extend NTFS volumes'
+            'exfatprogs: create exFAT volumes'
+            'btrfs-progs: create and extend Btrfs volumes'
+            'xfsprogs: create and extend XFS volumes')
 source=("git+$url.git")
 sha256sums=('SKIP')
 

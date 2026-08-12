@@ -16,8 +16,9 @@
 
 ## Deliberately deferred
 
-- Destructive partition creation, deletion, formatting, and resizing. These
-  require a separate UDisks2 safety design and real-hardware test matrix.
+- Delete Volume, Shrink Volume, offline/online disks, filesystem repair, and
+  dynamic/LVM volume workflows. Initialization, simple-volume creation,
+  formatting, and same-disk extension now use the UDisks2 safety design.
 - Closing active Samba sessions or remote files. Samba does not expose a
   stable unprivileged API for this operation, so it will need a separately
   reviewed privileged helper.

@@ -60,5 +60,50 @@ int main()
         QVariant::fromValue(QList<QByteArray>{rootMount, dataMount}));
     if (mountPoints != QStringList({"/", "/mnt/data"}))
         return 8;
+    BlockDevice disk;
+    disk.objectPath = "/org/freedesktop/UDisks2/block_devices/vdb";
+    disk.driveObjectPath = "/org/freedesktop/UDisks2/drives/vdb";
+    disk.stableId = "fixture-disk";
+    disk.deviceNumber = 1024;
+    disk.size = 100ULL * 1024ULL * 1024ULL;
+    disk.partitionable = true;
+    disk.partitionTable = "gpt";
+    BlockDevice first;
+    first.objectPath = "/org/freedesktop/UDisks2/block_devices/vdb1";
+    first.driveObjectPath = disk.driveObjectPath;
+    first.partitionTableObjectPath = disk.objectPath;
+    first.partition = true;
+    first.partitionOffset = 1ULL * 1024ULL * 1024ULL;
+    first.size = 39ULL * 1024ULL * 1024ULL;
+    first.fileSystem = "ext4";
+    BlockDevice second = first;
+    second.objectPath = "/org/freedesktop/UDisks2/block_devices/vdb2";
+    second.partitionOffset = 60ULL * 1024ULL * 1024ULL;
+    second.size = 20ULL * 1024ULL * 1024ULL;
+    const QList<BlockDevice> layout{disk, first, second};
+    const QList<DiskFreeRegion> gaps = UDisksBackend::freeRegions(layout);
+    if (gaps.size() != 2 || gaps[0].offset != 40ULL * 1024ULL * 1024ULL
+        || gaps[0].size != 20ULL * 1024ULL * 1024ULL
+        || gaps[1].offset != 80ULL * 1024ULL * 1024ULL
+        || gaps[1].size != 20ULL * 1024ULL * 1024ULL)
+        return 9;
+    const auto adjacent = UDisksBackend::adjacentFreeRegion(layout, first);
+    if (!adjacent || adjacent->offset != gaps[0].offset || adjacent->size != gaps[0].size)
+        return 10;
+    if (UDisksBackend::adjacentFreeRegion(layout, second)->offset != gaps[1].offset)
+        return 11;
+    const DiskOperationTarget target = UDisksBackend::targetFor(first);
+    if (target.objectPath != first.objectPath || target.deviceNumber != first.deviceNumber
+        || !target.partition || target.offset != first.partitionOffset)
+        return 12;
+    if (UDisksBackend::available()) {
+        QString capabilityError;
+        const auto capabilities = UDisksBackend::fileSystemCapabilities(&capabilityError);
+        if (capabilities.isEmpty() || !capabilityError.isEmpty()) return 13;
+        bool foundExt4 = false;
+        for (const auto &capability : capabilities)
+            if (capability.type == "ext4") foundExt4 = true;
+        if (!foundExt4) return 14;
+    }
     return 0;
 }

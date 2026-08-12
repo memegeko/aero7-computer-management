@@ -17,5 +17,11 @@ their D-Bus APIs and polkit authorization. Local account changes cross a
 separate, narrowly scoped polkit helper boundary; the helper validates its
 arguments and can only invoke a fixed list of standard account tools.
 
+Disk mutation code remains in `backends/UDisksBackend`. The UI only supplies a
+typed request containing an identity snapshot and user-approved parameters.
+The backend revalidates the live device, invokes one UDisks2 method at a time,
+waits for the kernel/UDev view to converge, and reloads the real state. The
+whole GUI never runs as root.
+
 Device Manager remains a separate program. Computer Management checks for and
 launches `devmgmt`; it does not duplicate or embed that code.

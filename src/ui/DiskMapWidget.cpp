@@ -24,6 +24,10 @@ struct Segment {
     quint64 offset = 0;
     quint64 size = 0;
     bool unallocated = false;
+    QString diskObjectPath;
+    QString diskStableId;
+    quint64 diskDeviceNumber = 0;
+    quint64 diskSize = 0;
 };
 
 QString displayName(const BlockDevice &device)
@@ -47,6 +51,7 @@ void DiskMapWidget::setDevices(const QList<BlockDevice> &devices)
         ? m_devices[m_selectedDevice].objectPath : QString{};
     m_devices = devices;
     m_selectedDevice = -1;
+    m_selectedFreeRegion.reset();
     if (!selectedPath.isEmpty()) {
         for (int index = 0; index < m_devices.size(); ++index) {
             if (m_devices[index].objectPath == selectedPath) {
@@ -60,11 +65,20 @@ void DiskMapWidget::setDevices(const QList<BlockDevice> &devices)
     update();
 }
 
+void DiskMapWidget::selectFreeRegion(const DiskFreeRegion &region)
+{
+    m_selectedDevice = -1;
+    m_selectedFreeRegion = region;
+    update();
+}
+
 void DiskMapWidget::selectDevice(int deviceIndex)
 {
-    if (deviceIndex < -1 || deviceIndex >= m_devices.size() || m_selectedDevice == deviceIndex)
+    if (deviceIndex < -1 || deviceIndex >= m_devices.size())
         return;
+    if (m_selectedDevice == deviceIndex && !m_selectedFreeRegion) return;
     m_selectedDevice = deviceIndex;
+    m_selectedFreeRegion.reset();
     update();
 }
 
@@ -147,12 +161,14 @@ void DiskMapWidget::paintEvent(QPaintEvent *)
                                leftRect.width() - 44, 20), Qt::AlignLeft | Qt::AlignVCenter,
                          QString("Disk %1").arg(diskNumber));
         painter.setFont(font());
-        const QString kind = disk && disk->removable ? "Removable" : "Basic";
+        const bool initialized = disk && !disk->partitionTable.isEmpty();
+        const QString kind = !initialized ? "Unknown" : disk->removable ? "Removable" : "Basic";
         painter.drawText(leftRect.left() + 40, leftRect.top() + 43, kind);
         painter.drawText(leftRect.left() + 40, leftRect.top() + 59, Format::bytes(group.capacity));
         painter.drawText(leftRect.left() + 40, leftRect.top() + 75,
-                         disk && disk->readOnly ? "Read-only" : "Online");
-        m_hitTargets << HitTarget{leftRect, leftSelection};
+                         !initialized ? "Not Initialized"
+                                      : disk && disk->readOnly ? "Read-only" : "Online");
+        m_hitTargets << HitTarget{leftRect, leftSelection, std::nullopt};
 
         QList<Segment> segments;
         quint64 cursor = 0;
@@ -160,12 +176,17 @@ void DiskMapWidget::paintEvent(QPaintEvent *)
             const BlockDevice &volume = m_devices[index];
             const quint64 offset = volume.partition ? volume.partitionOffset : 0;
             if (offset > cursor + MeaningfulGap)
-                segments << Segment{-1, cursor, offset - cursor, true};
+                segments << Segment{-1, cursor, offset - cursor, true,
+                    disk ? disk->objectPath : QString{}, disk ? disk->stableId : QString{},
+                    disk ? disk->deviceNumber : 0, group.capacity};
             segments << Segment{index, offset, volume.size, false};
             cursor = qMax(cursor, offset + volume.size);
         }
-        if (group.capacity > cursor + MeaningfulGap)
-            segments << Segment{-1, cursor, group.capacity - cursor, true};
+        if ((!disk || !disk->partitionTable.isEmpty())
+            && group.capacity > cursor + MeaningfulGap)
+            segments << Segment{-1, cursor, group.capacity - cursor, true,
+                disk ? disk->objectPath : QString{}, disk ? disk->stableId : QString{},
+                disk ? disk->deviceNumber : 0, group.capacity};
 
         const int areaLeft = LeftColumnWidth + OuterMargin;
         const int areaWidth = qMax(1, width() - areaLeft - OuterMargin);
@@ -174,8 +195,10 @@ void DiskMapWidget::paintEvent(QPaintEvent *)
             painter.fillRect(emptyRect, QColor("#f1f1f1"));
             painter.setPen(QColor("#8b8b8b"));
             painter.drawRect(emptyRect.adjusted(0, 0, -1, -1));
-            painter.drawText(emptyRect, Qt::AlignCenter, group.capacity ? "Unallocated" : "No media");
-            m_hitTargets << HitTarget{emptyRect, leftSelection};
+            painter.drawText(emptyRect, Qt::AlignCenter,
+                             disk && disk->partitionTable.isEmpty() ? "Not Initialized"
+                             : group.capacity ? "Unallocated" : "No media");
+            m_hitTargets << HitTarget{emptyRect, leftSelection, std::nullopt};
             continue;
         }
 
@@ -204,7 +227,10 @@ void DiskMapWidget::paintEvent(QPaintEvent *)
                 ? availableForSegment : qMin(widths[segmentNumber], availableForSegment);
             const QRect segmentRect(x, rowTop, qMax(1, segmentWidth), RowHeight - OuterMargin);
             const bool selected = segment.deviceIndex == m_selectedDevice
-                || (segment.unallocated && leftSelection == m_selectedDevice);
+                || (segment.unallocated && m_selectedFreeRegion
+                    && m_selectedFreeRegion->diskObjectPath == segment.diskObjectPath
+                    && m_selectedFreeRegion->offset == segment.offset
+                    && m_selectedFreeRegion->size == segment.size);
             painter.fillRect(segmentRect, selected ? QColor("#d8eafa")
                                                    : segment.unallocated ? QColor("#f2f2f2") : Qt::white);
             painter.fillRect(QRect(segmentRect.left(), segmentRect.top(), segmentRect.width(), 7),
@@ -236,27 +262,44 @@ void DiskMapWidget::paintEvent(QPaintEvent *)
                                  volumeStatus(volume));
             }
             painter.restore();
-            m_hitTargets << HitTarget{segmentRect, segment.unallocated ? leftSelection : segment.deviceIndex};
+            std::optional<DiskFreeRegion> freeRegion;
+            if (segment.unallocated) freeRegion = DiskFreeRegion{segment.diskObjectPath,
+                segment.diskStableId, segment.diskDeviceNumber, segment.diskSize,
+                segment.offset, segment.size};
+            m_hitTargets << HitTarget{segmentRect,
+                                      segment.unallocated ? leftSelection : segment.deviceIndex,
+                                      freeRegion};
             x += segmentRect.width() + SegmentGap;
             remainingWidth -= segmentRect.width() + SegmentGap;
         }
     }
 }
 
-int DiskMapWidget::hitTest(const QPoint &position) const
+std::optional<DiskMapWidget::HitTarget> DiskMapWidget::hitTest(const QPoint &position) const
 {
     for (auto iterator = m_hitTargets.crbegin(); iterator != m_hitTargets.crend(); ++iterator) {
-        if (iterator->rectangle.contains(position)) return iterator->deviceIndex;
+        if (iterator->rectangle.contains(position)) return *iterator;
     }
-    return -1;
+    return std::nullopt;
 }
 
 void DiskMapWidget::mousePressEvent(QMouseEvent *event)
 {
-    const int index = hitTest(event->position().toPoint());
-    if (index >= 0) {
-        selectDevice(index);
-        emit selectionChanged(index);
+    const auto target = hitTest(event->position().toPoint());
+    if (target) {
+        DiskMapSelection selection;
+        if (target->freeRegion) {
+            selectFreeRegion(*target->freeRegion);
+            selection.kind = DiskMapSelection::Unallocated;
+            selection.freeRegion = *target->freeRegion;
+        } else {
+            selectDevice(target->deviceIndex);
+            m_selectedFreeRegion.reset();
+            selection.kind = DiskMapSelection::Device;
+            selection.deviceIndex = target->deviceIndex;
+            emit selectionChanged(target->deviceIndex);
+        }
+        emit mapSelectionChanged(selection);
         setFocus();
     }
     QWidget::mousePressEvent(event);
@@ -264,18 +307,31 @@ void DiskMapWidget::mousePressEvent(QMouseEvent *event)
 
 void DiskMapWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    const int index = hitTest(event->position().toPoint());
-    if (index >= 0) emit deviceActivated(index);
+    const auto target = hitTest(event->position().toPoint());
+    if (target && !target->freeRegion && target->deviceIndex >= 0)
+        emit deviceActivated(target->deviceIndex);
     QWidget::mouseDoubleClickEvent(event);
 }
 
 void DiskMapWidget::contextMenuEvent(QContextMenuEvent *event)
 {
-    const int index = hitTest(event->pos());
-    if (index >= 0) {
-        selectDevice(index);
-        emit selectionChanged(index);
-        emit contextMenuRequested(index, event->globalPos());
+    const auto target = hitTest(event->pos());
+    if (target) {
+        DiskMapSelection selection;
+        if (target->freeRegion) {
+            selectFreeRegion(*target->freeRegion);
+            selection.kind = DiskMapSelection::Unallocated;
+            selection.freeRegion = *target->freeRegion;
+        } else {
+            selectDevice(target->deviceIndex);
+            m_selectedFreeRegion.reset();
+            selection.kind = DiskMapSelection::Device;
+            selection.deviceIndex = target->deviceIndex;
+            emit selectionChanged(target->deviceIndex);
+            emit contextMenuRequested(target->deviceIndex, event->globalPos());
+        }
+        emit mapSelectionChanged(selection);
+        emit mapContextMenuRequested(selection, event->globalPos());
         event->accept();
         return;
     }

@@ -6,6 +6,14 @@
 #include <QRect>
 #include <QWidget>
 
+#include <optional>
+
+struct DiskMapSelection {
+    enum Kind { None, Device, Unallocated } kind = None;
+    int deviceIndex = -1;
+    DiskFreeRegion freeRegion;
+};
+
 class DiskMapWidget final : public QWidget {
     Q_OBJECT
 public:
@@ -13,13 +21,18 @@ public:
 
     void setDevices(const QList<BlockDevice> &devices);
     void selectDevice(int deviceIndex);
+    void selectFreeRegion(const DiskFreeRegion &region);
     int selectedDevice() const { return m_selectedDevice; }
+    std::optional<DiskFreeRegion> selectedFreeRegion() const { return m_selectedFreeRegion; }
     QSize sizeHint() const override;
 
 signals:
     void selectionChanged(int deviceIndex);
     void deviceActivated(int deviceIndex);
     void contextMenuRequested(int deviceIndex, const QPoint &globalPosition);
+    void mapSelectionChanged(const DiskMapSelection &selection);
+    void mapContextMenuRequested(const DiskMapSelection &selection,
+                                 const QPoint &globalPosition);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -31,6 +44,7 @@ private:
     struct HitTarget {
         QRect rectangle;
         int deviceIndex = -1;
+        std::optional<DiskFreeRegion> freeRegion;
     };
 
     struct DiskGroup {
@@ -41,10 +55,13 @@ private:
     };
 
     QList<DiskGroup> groups() const;
-    int hitTest(const QPoint &position) const;
+    std::optional<HitTarget> hitTest(const QPoint &position) const;
     QString volumeStatus(const BlockDevice &device) const;
 
     QList<BlockDevice> m_devices;
     QList<HitTarget> m_hitTargets;
     int m_selectedDevice = -1;
+    std::optional<DiskFreeRegion> m_selectedFreeRegion;
 };
+
+Q_DECLARE_METATYPE(DiskMapSelection)

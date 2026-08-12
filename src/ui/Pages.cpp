@@ -1,6 +1,7 @@
 #include "Pages.h"
 
 #include "DiskMapWidget.h"
+#include "DiskDialogs.h"
 #include "PerformanceGraph.h"
 #include "backends/AccountsBackend.h"
 #include "backends/JournalBackend.h"
@@ -707,9 +708,9 @@ public:
         addLegend("#103a89", "Primary partition");
         addLegend("#000000", "Unallocated");
         legend->addStretch();
-        auto *notice = new QLabel("Partition creation, deletion, formatting, and resizing remain disabled until hardware safety testing is complete.");
+        auto *notice = new QLabel("Disk changes use UDisks2 and require administrator authorization.");
         notice->setStyleSheet("color:#666;");
-        notice->setToolTip("Safe view, rescan, mount, unmount, open, and properties actions use UDisks2.");
+        notice->setToolTip("Aero7 revalidates disk identity and protects the active system and boot disk before every change.");
         legend->addWidget(notice);
         lowerLayout->addLayout(legend);
         splitter->addWidget(lowerPane);
@@ -729,16 +730,24 @@ public:
                 showContextMenu(m_table->viewport()->mapToGlobal(position));
             }
         });
-        connect(m_diskMap, &DiskMapWidget::selectionChanged, this, [this](int index) {
-            selectDevice(index, true);
+        connect(m_diskMap, &DiskMapWidget::mapSelectionChanged, this,
+                [this](const DiskMapSelection &selection) {
+            if (selection.kind == DiskMapSelection::Unallocated) {
+                m_selectedFreeRegion = selection.freeRegion;
+                m_selectedDeviceIndex = -1;
+                m_table->clearSelection();
+                announceActions();
+            } else if (selection.kind == DiskMapSelection::Device) {
+                m_selectedFreeRegion.reset();
+                selectDevice(selection.deviceIndex, true);
+            }
         });
         connect(m_diskMap, &DiskMapWidget::deviceActivated, this, [this](int index) {
             selectDevice(index, true);
             properties();
         });
-        connect(m_diskMap, &DiskMapWidget::contextMenuRequested, this,
-                [this](int index, const QPoint &globalPosition) {
-            selectDevice(index, true);
+        connect(m_diskMap, &DiskMapWidget::mapContextMenuRequested, this,
+                [this](const DiskMapSelection &, const QPoint &globalPosition) {
             showContextMenu(globalPosition);
         });
         auto *timer = new QTimer(this);
@@ -750,18 +759,28 @@ public:
     QStringList actions() const override
     {
         QStringList result{"Refresh", "Rescan Disks"};
+        if (m_selectedFreeRegion) {
+            result.prepend("New Simple Volume...");
+            return result;
+        }
         const BlockDevice *device = selectedDevice();
         if (!device) return result;
-        result << "Properties";
+        if (!device->partition && device->partitionable && device->partitionTable.isEmpty()
+            && !device->critical && !device->readOnly)
+            result.prepend("Initialize Disk");
+        result << "Properties" << "Help";
+        if (canFormat(*device)) result.prepend("Format...");
+        if (canExtend(*device)) result.prepend("Extend Volume...");
         if (device->mountable)
             result << (device->mountPoint.isEmpty() ? "Mount" : "Unmount");
-        if (!device->mountPoint.isEmpty()) result << "Open Mount Point";
+        if (!device->mountPoint.isEmpty()) result << "Open" << "Explore";
         return result;
     }
 
     void refresh() override
     {
         const QString selectedPath = selectedDevice() ? selectedDevice()->objectPath : QString{};
+        const std::optional<DiskFreeRegion> selectedRegion = m_selectedFreeRegion;
         QString error;
         m_devices = UDisksBackend::devices(&error);
         m_volumeIndexes.clear();
@@ -791,6 +810,7 @@ public:
         m_diskMap->setDevices(m_devices);
 
         m_selectedDeviceIndex = -1;
+        m_selectedFreeRegion.reset();
         if (!selectedPath.isEmpty()) {
             for (int index = 0; index < m_devices.size(); ++index) {
                 if (m_devices[index].objectPath == selectedPath) {
@@ -802,6 +822,16 @@ public:
         if (m_selectedDeviceIndex >= 0) {
             m_diskMap->selectDevice(m_selectedDeviceIndex);
             selectTableRow(m_selectedDeviceIndex);
+        } else if (selectedRegion) {
+            for (const DiskFreeRegion &region : UDisksBackend::freeRegions(m_devices)) {
+                if (region.diskObjectPath == selectedRegion->diskObjectPath
+                    && region.offset == selectedRegion->offset && region.size == selectedRegion->size) {
+                    m_selectedFreeRegion = region;
+                    m_diskMap->selectFreeRegion(region);
+                    break;
+                }
+            }
+            m_table->clearSelection();
         } else {
             m_table->clearSelection();
             m_diskMap->selectDevice(-1);
@@ -832,6 +862,10 @@ public:
             refresh();
             return;
         }
+        if (action == "New Simple Volume...") {
+            newSimpleVolume();
+            return;
+        }
         const BlockDevice *device = selectedDevice();
         if (!device) return;
         const QString objectPath = device->objectPath;
@@ -839,7 +873,24 @@ public:
             properties();
             return;
         }
-        if (action == "Open Mount Point") {
+        if (action == "Initialize Disk") {
+            initializeDisks();
+            return;
+        }
+        if (action == "Format...") {
+            formatVolume();
+            return;
+        }
+        if (action == "Extend Volume...") {
+            extendVolume();
+            return;
+        }
+        if (action == "Help") {
+            QMessageBox::information(this, "Disk Management Help",
+                "Initialize creates an empty GPT or MBR partition table. New Simple Volume creates and optionally formats a partition. Format erases a selected volume. Extend grows a compatible partition and its filesystem into adjacent unallocated space.");
+            return;
+        }
+        if (action == "Open" || action == "Explore") {
             if (device->mountPoint.isEmpty()
                 || !QDesktopServices::openUrl(QUrl::fromLocalFile(device->mountPoint)))
                 QMessageBox::warning(this, action, "The selected volume has no accessible mount point.");
@@ -856,7 +907,14 @@ public:
 private:
     static QString displayName(const BlockDevice &device)
     {
-        return device.label.isEmpty() ? device.device : device.label;
+        const QString base = device.label.isEmpty() ? device.device : device.label;
+        QSettings settings("Aero7", "ComputerManagement");
+        QString letter;
+        if (!device.partUuid.isEmpty())
+            letter = settings.value("DriveLetters/partuuid-" + device.partUuid).toString();
+        if (letter.isEmpty() && !device.uuid.isEmpty())
+            letter = settings.value("DriveLetters/" + device.uuid).toString();
+        return letter.isEmpty() ? base : QString("%1 (%2)").arg(base, letter);
     }
 
     static QString status(const BlockDevice &device)
@@ -879,6 +937,7 @@ private:
     {
         if (deviceIndex < 0 || deviceIndex >= m_devices.size()) return;
         m_selectedDeviceIndex = deviceIndex;
+        m_selectedFreeRegion.reset();
         m_diskMap->selectDevice(deviceIndex);
         if (syncTable) {
             m_syncingSelection = true;
@@ -916,6 +975,204 @@ private:
         menu.exec(globalPosition);
     }
 
+    int diskNumber(const QString &diskObjectPath) const
+    {
+        int number = 0;
+        QSet<QString> seen;
+        for (const BlockDevice &candidate : m_devices) {
+            if (candidate.partition) continue;
+            const QString key = candidate.objectPath;
+            if (seen.contains(key)) continue;
+            if (key == diskObjectPath) return number;
+            seen.insert(key);
+            ++number;
+        }
+        return number;
+    }
+
+    QStringList availableDriveLetters() const
+    {
+        QSet<QString> used;
+        QSettings settings("Aero7", "ComputerManagement");
+        settings.beginGroup("DriveLetters");
+        for (const QString &key : settings.childKeys()) used.insert(settings.value(key).toString());
+        settings.endGroup();
+        QStringList result;
+        for (QChar letter = 'D'; letter <= 'Z'; letter = QChar(letter.unicode() + 1)) {
+            const QString value = QString(letter) + ':';
+            if (!used.contains(value)) result << value;
+        }
+        return result;
+    }
+
+    const BlockDevice *diskForRegion(const DiskFreeRegion &region) const
+    {
+        for (const BlockDevice &device : m_devices)
+            if (!device.partition && device.objectPath == region.diskObjectPath) return &device;
+        return nullptr;
+    }
+
+    bool canFormat(const BlockDevice &device) const
+    {
+        return device.partition && !device.readOnly && !device.critical
+            && (device.mountable || !device.fileSystem.isEmpty());
+    }
+
+    bool canExtend(const BlockDevice &device) const
+    {
+        if (!device.partition || device.readOnly || device.critical || device.fileSystem.isEmpty()
+            || !UDisksBackend::adjacentFreeRegion(m_devices, device)) return false;
+        const auto capability = UDisksBackend::capabilityFor(device.fileSystem);
+        return capability && (capability->canGrowMounted || capability->canGrowUnmounted);
+    }
+
+    struct BusyCursor {
+        BusyCursor() { QApplication::setOverrideCursor(Qt::WaitCursor); }
+        ~BusyCursor() { QApplication::restoreOverrideCursor(); }
+    };
+
+    void initializeDisks()
+    {
+        QList<QPair<int, BlockDevice>> candidates;
+        int number = 0;
+        for (const BlockDevice &disk : m_devices) {
+            if (disk.partition) continue;
+            if (disk.partitionable && disk.partitionTable.isEmpty() && !disk.critical
+                && !disk.readOnly && !disk.optical)
+                candidates << qMakePair(number, disk);
+            ++number;
+        }
+        if (candidates.isEmpty()) return;
+        InitializeDiskDialog dialog(candidates, this);
+        if (dialog.exec() != QDialog::Accepted) return;
+        if (!confirm(this, "Initialize Disk",
+            "Initializing replaces partition-table metadata on the selected disk(s). Existing data may become inaccessible.\n\nDo you want to continue?")) return;
+        QStringList errors;
+        BusyCursor cursor;
+        for (const int selectedNumber : dialog.selectedDiskIndexes()) {
+            for (const auto &[numberValue, disk] : candidates) {
+                if (numberValue != selectedNumber) continue;
+                QString error;
+                if (!UDisksBackend::initializeDisk(UDisksBackend::targetFor(disk),
+                                                   dialog.partitionTableType(), &error))
+                    errors << QString("Disk %1: %2").arg(numberValue).arg(error);
+            }
+        }
+        refresh();
+        if (!errors.isEmpty()) QMessageBox::warning(this, "Initialize Disk", errors.join("\n\n"));
+    }
+
+    void newSimpleVolume()
+    {
+        if (!m_selectedFreeRegion) return;
+        const DiskFreeRegion region = *m_selectedFreeRegion;
+        const BlockDevice *disk = diskForRegion(region);
+        if (!disk) return;
+        if (disk->partitionTable.isEmpty()) {
+            QMessageBox::information(this, "New Simple Volume", "Initialize the disk first.");
+            return;
+        }
+        QString capabilityError;
+        const auto capabilities = UDisksBackend::fileSystemCapabilities(&capabilityError);
+        NewSimpleVolumeWizard wizard(region, capabilities, availableDriveLetters(), this);
+        if (wizard.exec() != QDialog::Accepted) return;
+        const NewVolumeOptions options = wizard.options();
+        if (!confirm(this, "New Simple Volume",
+            QString("Create a %1 MB simple volume on Disk %2%3?\n\nDisk changes cannot be undone.")
+                .arg(options.sizeBytes / (1024ULL * 1024ULL))
+                .arg(diskNumber(region.diskObjectPath))
+                .arg(options.format ? QString(" and format it as %1").arg(options.fileSystem) : QString{})))
+            return;
+        CreateVolumeRequest request;
+        request.disk = UDisksBackend::targetFor(*disk);
+        request.regionOffset = region.offset;
+        request.regionSize = region.size;
+        request.requestedSize = options.sizeBytes;
+        request.fileSystem = options.fileSystem;
+        request.label = options.label;
+        request.format = options.format;
+        request.quickFormat = options.quickFormat;
+        request.mount = options.format && options.assignment != NewVolumeOptions::None;
+        request.mountFolder = options.assignment == NewVolumeOptions::Folder
+            ? options.mountFolder : QString{};
+        DiskOperationResult operation;
+        {
+            BusyCursor cursor;
+            operation = UDisksBackend::createVolume(request);
+        }
+        refresh();
+        if (operation.success && options.assignment == NewVolumeOptions::DriveLetter
+            && !operation.objectPath.isEmpty()) {
+            for (const BlockDevice &created : m_devices) {
+            if (created.objectPath == operation.objectPath
+                && (!created.partUuid.isEmpty() || !created.uuid.isEmpty())) {
+                    QSettings settings("Aero7", "ComputerManagement");
+                    const QString key = !created.partUuid.isEmpty()
+                        ? "DriveLetters/partuuid-" + created.partUuid
+                        : "DriveLetters/" + created.uuid;
+                    settings.setValue(key, options.driveLetter);
+                    refresh();
+                    break;
+                }
+            }
+        }
+        if (operation.success) QMessageBox::information(this, "New Simple Volume", operation.message);
+        else QMessageBox::warning(this, operation.partial ? "New Simple Volume — Partially Completed"
+                                                        : "New Simple Volume", operation.message);
+    }
+
+    void formatVolume()
+    {
+        const BlockDevice *device = selectedDevice();
+        if (!device || !canFormat(*device)) return;
+        const DiskOperationTarget target = UDisksBackend::targetFor(*device);
+        const QString name = displayName(*device);
+        const auto capabilities = UDisksBackend::fileSystemCapabilities();
+        FormatVolumeDialog dialog(name, device->label, device->fileSystem, capabilities, this);
+        if (dialog.exec() != QDialog::Accepted) return;
+        const FormatVolumeOptions options = dialog.options();
+        if (QMessageBox::warning(this, "Format " + name,
+            "Formatting this volume will erase all data on it.\n\n"
+            "Back up any data you want to keep before formatting.\n\nDo you want to continue?",
+            QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Ok) return;
+        FormatVolumeRequest request{target, options.fileSystem, options.label,
+                                    options.quickFormat, true};
+        DiskOperationResult operation;
+        {
+            BusyCursor cursor;
+            operation = UDisksBackend::formatVolume(request);
+        }
+        refresh();
+        if (operation.success) QMessageBox::information(this, "Format", operation.message);
+        else QMessageBox::warning(this, operation.partial ? "Format — Partially Completed" : "Format",
+                                  operation.message);
+    }
+
+    void extendVolume()
+    {
+        const BlockDevice *device = selectedDevice();
+        if (!device || !canExtend(*device)) return;
+        const DiskOperationTarget target = UDisksBackend::targetFor(*device);
+        const auto region = UDisksBackend::adjacentFreeRegion(m_devices, *device);
+        if (!region) return;
+        ExtendVolumeWizard wizard(diskNumber(region->diskObjectPath), device->size, region->size, this);
+        if (wizard.exec() != QDialog::Accepted) return;
+        const quint64 additional = wizard.additionalBytes();
+        if (!confirm(this, "Extend Volume",
+            QString("Extend %1 by %2?\n\nThe partition boundary and filesystem will both be enlarged.")
+                .arg(displayName(*device), Format::bytes(additional)))) return;
+        ExtendVolumeRequest request{target, additional, region->offset, region->size};
+        DiskOperationResult operation;
+        {
+            BusyCursor cursor;
+            operation = UDisksBackend::extendVolume(request);
+        }
+        refresh();
+        if (operation.success) QMessageBox::information(this, "Extend Volume", operation.message);
+        else QMessageBox::warning(this, operation.partial ? "Extend Volume — Partially Completed"
+                                                        : "Extend Volume", operation.message);
+    }
+
     void properties()
     {
         const BlockDevice *device = selectedDevice();
@@ -945,6 +1202,7 @@ private:
     QList<BlockDevice> m_devices;
     QList<int> m_volumeIndexes;
     int m_selectedDeviceIndex = -1;
+    std::optional<DiskFreeRegion> m_selectedFreeRegion;
     bool m_syncingSelection = false;
 };
 

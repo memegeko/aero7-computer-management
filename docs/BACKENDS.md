@@ -9,7 +9,7 @@
 | Users / Groups | libc `getpwent`/`getgrent`; shadow tools through polkit helper | Inventory, properties, user/group creation and authenticated maintenance |
 | Performance Monitor | `/proc/stat`, `/proc/meminfo`, `/proc/diskstats`, `/proc/net/dev` | Asynchronous one-second sampling and a 120-sample selectable graph |
 | Device Manager | external `devmgmt` | Availability check and launch without duplicating hardware scanning |
-| Disk Management | UDisks2 over Qt D-Bus | Detailed inventory, rescan, properties, mount/unmount, open mount point |
+| Disk Management | UDisks2 over Qt D-Bus | Inventory, free-region modelling, GPT/MBR initialization, partition creation, filesystem formatting, same-disk extension, tracked mount folders, mount/unmount, rescan, and properties |
 | Services | systemd system/user D-Bus managers | Inventory, startup state, dependencies, logs, lifecycle and unit-file actions |
 
 The labels translate Linux concepts into the Aero7 interface; they do not
@@ -25,9 +25,17 @@ Control Manager, or Windows Task Scheduler emulation.
   and never invokes a shell.
 - Samba user shares use the calling user's `net usershare` permissions.
 
-## Deliberately deferred
+## Disk-operation safety
 
-Partition creation, deletion, formatting, resizing, label changes, and new
-partition tables remain disabled. They will only be added through UDisks2 with
-explicit confirmation, target revalidation, system-partition protection, and
-real-hardware test evidence.
+The GUI keeps a UDisks object path, persistent block identifier, device number,
+partition UUID/filesystem UUID, size, and offset snapshot. The backend reloads
+the UDisks inventory and compares that identity immediately before every
+mutation. It refuses read-only media and any drive containing `/`, `/boot`, or
+`/boot/efi`. Each destructive flow has a final confirmation and every result is
+verified from a fresh inventory.
+
+UDisks2's `CanFormat` and `CanResize` determine which filesystems and extend
+actions are enabled. Extension first grows the partition and then the
+filesystem. If the second step fails, the UI reports the partial result rather
+than claiming success. Dynamic-disk spanning, deletion, and shrink remain
+deliberately deferred.
