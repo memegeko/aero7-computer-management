@@ -1066,9 +1066,14 @@ private:
     {
         if (!m_selectedFreeRegion) return;
         const DiskFreeRegion region = *m_selectedFreeRegion;
-        const BlockDevice *disk = diskForRegion(region);
-        if (!disk) return;
-        if (disk->partitionTable.isEmpty()) {
+        const BlockDevice *selectedDisk = diskForRegion(region);
+        if (!selectedDisk) return;
+        // Modal wizards keep the event loop running, so the periodic refresh timer can replace
+        // m_devices while a wizard is open. Keep an identity snapshot instead of retaining a
+        // pointer into that container across wizard.exec(). The backend revalidates this snapshot
+        // against the live UDisks2 inventory immediately before changing the disk.
+        const BlockDevice disk = *selectedDisk;
+        if (disk.partitionTable.isEmpty()) {
             QMessageBox::information(this, "New Simple Volume", "Initialize the disk first.");
             return;
         }
@@ -1084,7 +1089,7 @@ private:
                 .arg(options.format ? QString(" and format it as %1").arg(options.fileSystem) : QString{})))
             return;
         CreateVolumeRequest request;
-        request.disk = UDisksBackend::targetFor(*disk);
+        request.disk = UDisksBackend::targetFor(disk);
         request.regionOffset = region.offset;
         request.regionSize = region.size;
         request.requestedSize = options.sizeBytes;
@@ -1153,6 +1158,7 @@ private:
         const BlockDevice *device = selectedDevice();
         if (!device || !canExtend(*device)) return;
         const DiskOperationTarget target = UDisksBackend::targetFor(*device);
+        const QString volumeName = displayName(*device);
         const auto region = UDisksBackend::adjacentFreeRegion(m_devices, *device);
         if (!region) return;
         ExtendVolumeWizard wizard(diskNumber(region->diskObjectPath), device->size, region->size, this);
@@ -1160,7 +1166,7 @@ private:
         const quint64 additional = wizard.additionalBytes();
         if (!confirm(this, "Extend Volume",
             QString("Extend %1 by %2?\n\nThe partition boundary and filesystem will both be enlarged.")
-                .arg(displayName(*device), Format::bytes(additional)))) return;
+                .arg(volumeName, Format::bytes(additional)))) return;
         ExtendVolumeRequest request{target, additional, region->offset, region->size};
         DiskOperationResult operation;
         {
