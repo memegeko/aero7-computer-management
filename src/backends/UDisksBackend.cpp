@@ -349,7 +349,13 @@ QList<BlockDevice> UDisksBackend::devices(QString *error)
             device.driveVendor = driveProperties.value("Vendor").toString().trimmed();
             device.connectionBus = driveProperties.value("ConnectionBus").toString().trimmed();
             device.serial = driveProperties.value("Serial").toString().trimmed();
-            device.optical = driveProperties.value("Optical").toBool();
+            const QStringList mediaCompatibility =
+                driveProperties.value("MediaCompatibility").toStringList();
+            device.optical = driveProperties.value("Optical").toBool()
+                || std::any_of(mediaCompatibility.cbegin(), mediaCompatibility.cend(),
+                               [](const QString &media) {
+                    return media.startsWith("optical_");
+                });
             device.removable = driveProperties.value("Removable").toBool()
                 || driveProperties.value("MediaRemovable").toBool();
         }
