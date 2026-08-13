@@ -7,9 +7,12 @@
 #include <QDBusObjectPath>
 #include <QDBusReply>
 #include <QDBusMetaType>
+#include <QDBusVariant>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QHash>
+#include <QRegularExpression>
 #include <QStorageInfo>
 #include <QThread>
 
@@ -24,6 +27,8 @@ struct UDisksConfigurationItem {
 };
 
 Q_DECLARE_METATYPE(UDisksConfigurationItem)
+using UDisksConfiguration = QList<UDisksConfigurationItem>;
+Q_DECLARE_METATYPE(UDisksConfiguration)
 
 QDBusArgument &operator<<(QDBusArgument &argument, const UDisksConfigurationItem &item)
 {
@@ -52,9 +57,39 @@ QVariantMap properties(const QString &path, const QString &interface)
 
 QString decodedBytes(const QVariant &value)
 {
-    QByteArray bytes = value.toByteArray();
+    QVariant unwrapped = value;
+    if (value.metaType().id() == qMetaTypeId<QDBusVariant>())
+        unwrapped = value.value<QDBusVariant>().variant();
+    QByteArray bytes = qdbus_cast<QByteArray>(unwrapped);
+    if (bytes.isEmpty()) bytes = unwrapped.toByteArray();
     if (!bytes.isEmpty() && bytes.endsWith('\0')) bytes.chop(1);
     return QString::fromLocal8Bit(bytes);
+}
+
+UDisksConfiguration configurationItems(const QVariant &value)
+{
+    qDBusRegisterMetaType<UDisksConfigurationItem>();
+    qDBusRegisterMetaType<UDisksConfiguration>();
+    return qdbus_cast<UDisksConfiguration>(value);
+}
+
+bool isAeroStartupMount(const UDisksConfigurationItem &item)
+{
+    return item.type == "fstab"
+        && decodedBytes(item.details.value("opts")).split(',').contains("x-aero7-managed");
+}
+
+quint64 shrinkCapacity(const BlockDevice &volume)
+{
+    constexpr quint64 MiB = 1024ULL * 1024ULL;
+    if (!volume.freeSpaceKnown || !volume.size || !volume.fileSystemSize) return 0;
+    const quint64 reserve = qMax<quint64>(256ULL * MiB, volume.fileSystemSize / 20);
+    if (volume.freeBytes <= reserve) return 0;
+    quint64 maximum = volume.freeBytes - reserve;
+    const quint64 minimumVolume = 512ULL * MiB;
+    if (volume.size <= minimumVolume) return 0;
+    maximum = qMin(maximum, volume.size - minimumVolume);
+    return maximum / MiB * MiB;
 }
 
 bool interfaceCall(const QString &path, const QString &interface, const QString &method,
@@ -206,6 +241,20 @@ bool waitForTable(const QString &objectPath, const QString &type, QString *error
     return false;
 }
 
+bool waitForDisappearance(const QString &objectPath, QString *error)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 12000) {
+        QString inventoryError;
+        const QList<BlockDevice> inventory = UDisksBackend::devices(&inventoryError);
+        if (!findDevice(inventory, objectPath)) return true;
+        QThread::msleep(200);
+    }
+    if (error) *error = "The partition deletion returned, but the device is still present.";
+    return false;
+}
+
 bool callBooleanString(const QString &method, const QString &type, bool *available,
                        QString *utility, quint64 *flags, QString *error)
 {
@@ -247,33 +296,17 @@ QByteArray nulTerminated(const QString &text)
     return result;
 }
 
-bool configureMountFolder(const QString &objectPath, const QString &folder,
-                          const QString &fileSystem, QString *error)
+UDisksConfigurationItem startupMountItem(const QString &folder, const QString &fileSystem)
 {
-    if (folder.isEmpty()) return true;
-    const QFileInfo info(folder);
-    const QDir directory(folder);
-    if (!info.isAbsolute() || !info.exists() || !info.isDir() || info.isSymLink()) {
-        if (error) *error = "The mount folder must be an existing absolute directory and may not be a symbolic link.";
-        return false;
-    }
-    if (folder == "/" || folder == "/boot" || folder == "/boot/efi"
-        || !directory.entryList(QDir::AllEntries | QDir::NoDotAndDotDot).isEmpty()) {
-        if (error) *error = "The selected mount folder must be empty and cannot be a system directory.";
-        return false;
-    }
-    qDBusRegisterMetaType<UDisksConfigurationItem>();
     UDisksConfigurationItem item;
     item.type = "fstab";
     item.details.insert("dir", nulTerminated(QDir::cleanPath(folder)));
     item.details.insert("type", nulTerminated(fileSystem));
-    item.details.insert("opts", nulTerminated("defaults,nofail,x-gvfs-show"));
+    item.details.insert("opts", nulTerminated("defaults,nofail,x-gvfs-show,x-aero7-managed"));
     item.details.insert("freq", 0);
     item.details.insert("passno", 0);
     item.details.insert("track-parents", true);
-    const QDBusMessage reply = interfaceCall(objectPath, "org.freedesktop.UDisks2.Block",
-        "AddConfigurationItem", {QVariant::fromValue(item), QVariantMap{}}, error);
-    return reply.type() != QDBusMessage::ErrorMessage;
+    return item;
 }
 }
 
@@ -332,6 +365,15 @@ QList<BlockDevice> UDisksBackend::devices(QString *error)
         device.size = block.value("Size").toULongLong();
         device.mountable = !filesystem.isEmpty();
         device.fileSystemSize = filesystem.value("Size").toULongLong();
+        const UDisksConfiguration configuration = configurationItems(block.value("Configuration"));
+        for (const UDisksConfigurationItem &item : configuration) {
+            if (item.type != "fstab") continue;
+            const QString options = decodedBytes(item.details.value("opts"));
+            if (options.split(',').contains("noauto")) continue;
+            device.mountAtStartup = true;
+            device.startupMountPoint = decodedBytes(item.details.value("dir"));
+            if (isAeroStartupMount(item)) device.aeroManagedStartupMount = true;
+        }
         device.mountPoints = decodeMountPoints(filesystem.value("MountPoints"));
         device.mountPoint = device.mountPoints.value(0);
         if (!device.mountPoint.isEmpty()) {
@@ -504,7 +546,9 @@ QList<FileSystemCapability> UDisksBackend::fileSystemCapabilities(QString *error
         QString resizeUtility;
         if (callBooleanString("CanResize", type, &canResize, &resizeUtility, &flags, nullptr)
             && canResize) {
+            capability.canShrinkUnmounted = flags & 2;
             capability.canGrowUnmounted = flags & 4;
+            capability.canShrinkMounted = flags & 8;
             capability.canGrowMounted = flags & 16;
         }
         if (capability.missingUtility.isEmpty() && !resizeUtility.isEmpty())
@@ -513,6 +557,39 @@ QList<FileSystemCapability> UDisksBackend::fileSystemCapabilities(QString *error
     }
     if (result.isEmpty() && error) *error = "UDisks2 did not report any supported filesystems.";
     return result;
+}
+
+quint64 UDisksBackend::maximumShrinkBytes(const DiskOperationTarget &target, QString *error)
+{
+    BlockDevice volume;
+    if (!currentTarget(target, &volume, error) || !volume.partition
+        || volume.fileSystem.isEmpty()) return 0;
+    const auto capability = capabilityFor(volume.fileSystem, error);
+    if (!capability || (!capability->canShrinkMounted && !capability->canShrinkUnmounted)) {
+        if (error && error->isEmpty())
+            *error = QString("The %1 filesystem cannot be safely shrunk.").arg(volume.fileSystem);
+        return 0;
+    }
+    const bool temporarilyMount = volume.mountPoint.isEmpty();
+    if (temporarilyMount) {
+        QString mountError;
+        if (!mount(volume.objectPath, &mountError)) {
+            if (error) *error = humanError(mountError);
+            return 0;
+        }
+        if (!waitForDevice(volume.objectPath, &volume, error, 12000,
+                           [](const BlockDevice &current) {
+                               return current.freeSpaceKnown && !current.mountPoint.isEmpty();
+                           })) {
+            unmount(volume.objectPath, nullptr);
+            return 0;
+        }
+    }
+    const quint64 maximum = shrinkCapacity(volume);
+    if (temporarilyMount) unmount(volume.objectPath, nullptr);
+    if (!maximum && error)
+        *error = "The volume does not have enough verified free space to shrink safely.";
+    return maximum;
 }
 
 std::optional<FileSystemCapability> UDisksBackend::capabilityFor(const QString &type,
@@ -637,13 +714,6 @@ DiskOperationResult UDisksBackend::createVolume(const CreateVolumeRequest &reque
             })) {
         result.partial = true;
         result.message = "The partition exists, but the requested filesystem was not detected after formatting.";
-        return result;
-    }
-    if (!request.mountFolder.isEmpty()
-        && !configureMountFolder(createdPath, request.mountFolder, request.fileSystem, &error)) {
-        result.partial = true;
-        result.message = "The volume was created and formatted, but its mount folder could not be configured: "
-            + humanError(error);
         return result;
     }
     if (request.mount) {
@@ -808,5 +878,263 @@ DiskOperationResult UDisksBackend::extendVolume(const ExtendVolumeRequest &reque
     result.objectPath = volume.objectPath;
     result.mountPoint = grown.mountPoint;
     result.message = "The volume was extended successfully.";
+    return result;
+}
+
+DiskOperationResult UDisksBackend::shrinkVolume(const ShrinkVolumeRequest &request)
+{
+    constexpr quint64 MiB = 1024ULL * 1024ULL;
+    DiskOperationResult result;
+    BlockDevice volume;
+    QString error;
+    if (!currentTarget(request.volume, &volume, &error) || !volume.partition
+        || volume.fileSystem.isEmpty()) {
+        result.message = humanError(error.isEmpty() ? "Select a formatted basic partition." : error);
+        return result;
+    }
+    const auto capability = capabilityFor(volume.fileSystem, &error);
+    if (!capability || (!capability->canShrinkMounted && !capability->canShrinkUnmounted)) {
+        result.message = capability && !capability->missingUtility.isEmpty()
+            ? QString("Shrinking %1 requires %2.").arg(volume.fileSystem,
+                                                       capability->missingUtility)
+            : QString("The %1 filesystem cannot be safely shrunk.").arg(volume.fileSystem);
+        return result;
+    }
+    const bool wasMounted = !volume.mountPoint.isEmpty();
+    if (!wasMounted) {
+        if (!mount(volume.objectPath, &error)
+            || !waitForDevice(volume.objectPath, &volume, &error, 12000,
+                              [](const BlockDevice &current) {
+                                  return current.freeSpaceKnown && !current.mountPoint.isEmpty();
+                              })) {
+            result.message = "Free space could not be measured safely: " + humanError(error);
+            return result;
+        }
+    }
+    const quint64 maximum = shrinkCapacity(volume);
+    if (request.amountBytes < 8ULL * MiB || request.amountBytes > maximum
+        || request.amountBytes >= volume.size) {
+        if (!wasMounted) unmount(volume.objectPath, nullptr);
+        result.message = "The requested shrink size exceeds the currently verified free space.";
+        return result;
+    }
+    auto restoreOriginalMountState = [&] {
+        BlockDevice current;
+        if (!waitForDevice(volume.objectPath, &current, nullptr, 1000)) return;
+        if (wasMounted && request.remount && current.mountPoint.isEmpty())
+            mount(volume.objectPath, nullptr);
+        else if (!wasMounted && !current.mountPoint.isEmpty())
+            unmount(volume.objectPath, nullptr);
+    };
+    if (!capability->canShrinkMounted && !unmount(volume.objectPath, &error)) {
+        restoreOriginalMountState();
+        result.message = humanError(error);
+        return result;
+    }
+    const quint64 requestedSize = volume.size - request.amountBytes;
+    const QDBusMessage fileSystemResize = interfaceCall(volume.objectPath,
+        "org.freedesktop.UDisks2.Filesystem", "Resize",
+        {QVariant::fromValue<qulonglong>(requestedSize), QVariantMap{}}, &error);
+    if (fileSystemResize.type() == QDBusMessage::ErrorMessage) {
+        restoreOriginalMountState();
+        result.message = humanError(error);
+        return result;
+    }
+    BlockDevice shrunk;
+    if (!waitForDevice(volume.objectPath, &shrunk, &error, 30000,
+            [requestedSize](const BlockDevice &current) {
+                return current.fileSystemSize > 0
+                    && current.fileSystemSize <= requestedSize + 4ULL * 1024ULL * 1024ULL;
+            })) {
+        restoreOriginalMountState();
+        result.partial = true;
+        result.message = "The filesystem resize returned, but its smaller size could not be verified. "
+                         "The partition boundary was left unchanged.";
+        return result;
+    }
+    // Even when a filesystem supports shrinking while mounted, moving the
+    // containing partition boundary is an offline operation.
+    if (!shrunk.mountPoint.isEmpty() && !unmount(volume.objectPath, &error)) {
+        restoreOriginalMountState();
+        result.partial = true;
+        result.message = "The filesystem was shrunk, but the volume could not be unmounted before "
+                         "moving the partition boundary: " + humanError(error);
+        return result;
+    }
+    const QDBusMessage partitionResize = interfaceCall(volume.objectPath,
+        "org.freedesktop.UDisks2.Partition", "Resize",
+        {QVariant::fromValue<qulonglong>(requestedSize), QVariantMap{}}, &error);
+    if (partitionResize.type() == QDBusMessage::ErrorMessage) {
+        restoreOriginalMountState();
+        result.partial = true;
+        result.message = "The filesystem was shrunk safely, but the partition boundary did not move: "
+            + humanError(error);
+        return result;
+    }
+    if (!waitForDevice(volume.objectPath, &shrunk, &error, 12000,
+            [requestedSize](const BlockDevice &current) {
+                const quint64 tolerance = 4ULL * 1024ULL * 1024ULL;
+                return current.size + tolerance >= requestedSize
+                    && current.size <= requestedSize + tolerance;
+            })) {
+        restoreOriginalMountState();
+        result.partial = true;
+        result.message = "The shrink completed, but the final partition size could not be verified.";
+        return result;
+    }
+    if (wasMounted && request.remount && shrunk.mountPoint.isEmpty()
+        && !mount(volume.objectPath, &error)) {
+        result.partial = true;
+        result.message = "The volume was shrunk, but it could not be remounted: " + humanError(error);
+        return result;
+    }
+    result.success = true;
+    result.objectPath = volume.objectPath;
+    result.message = "The volume was shrunk successfully. The released space is now unallocated.";
+    return result;
+}
+
+DiskOperationResult UDisksBackend::deleteVolume(const DiskOperationTarget &target)
+{
+    DiskOperationResult result;
+    BlockDevice volume;
+    QString error;
+    if (!currentTarget(target, &volume, &error) || !volume.partition) {
+        result.message = humanError(error.isEmpty() ? "Select a basic partition." : error);
+        return result;
+    }
+    if (!volume.mountPoint.isEmpty() && !unmount(volume.objectPath, &error)) {
+        result.message = humanError(error);
+        return result;
+    }
+    const QDBusMessage deleted = interfaceCall(volume.objectPath,
+        "org.freedesktop.UDisks2.Partition", "Delete",
+        {QVariantMap{{"tear-down", true}}}, &error);
+    if (deleted.type() == QDBusMessage::ErrorMessage) {
+        result.message = humanError(error);
+        return result;
+    }
+    if (!waitForDisappearance(volume.objectPath, &error)) {
+        result.partial = true;
+        result.message = error;
+        return result;
+    }
+    result.success = true;
+    result.message = "The volume was deleted. Its space is now unallocated.";
+    return result;
+}
+
+QString UDisksBackend::recommendedStartupMountPoint(const BlockDevice &volume)
+{
+    QString name = volume.label.trimmed();
+    if (name.isEmpty()) name = volume.uuid.left(8);
+    if (name.isEmpty()) name = QString("volume-%1").arg(volume.partitionNumber);
+    name = name.toLower();
+    name.replace(QRegularExpression("[^a-z0-9._-]+"), "-");
+    name.remove(QRegularExpression("^-+|-+$"));
+    if (name.isEmpty()) name = "volume";
+    return "/mnt/aero7-" + name.left(48);
+}
+
+DiskOperationResult UDisksBackend::setMountAtStartup(const DiskOperationTarget &target,
+                                                      bool enabled,
+                                                      const QString &mountPoint)
+{
+    DiskOperationResult result;
+    BlockDevice volume;
+    QString error;
+    if (!currentTarget(target, &volume, &error) || !volume.mountable
+        || volume.uuid.isEmpty()) {
+        result.message = humanError(error.isEmpty()
+            ? "A formatted volume with a stable UUID is required." : error);
+        return result;
+    }
+    const QVariantMap block = properties(volume.objectPath, "org.freedesktop.UDisks2.Block");
+    const UDisksConfiguration existing = configurationItems(block.value("Configuration"));
+    if (enabled) {
+        if (volume.mountAtStartup) {
+            result.success = true;
+            result.message = "This volume is already configured to mount at startup.";
+            return result;
+        }
+        const QString folder = QDir::cleanPath(mountPoint.isEmpty()
+            ? recommendedStartupMountPoint(volume) : mountPoint);
+        if (!folder.startsWith("/mnt/aero7-") || folder == "/mnt/aero7-") {
+            result.message = "Choose an Aero7 startup mount point below /mnt (for example /mnt/aero7-data).";
+            return result;
+        }
+        if (QFileInfo(folder).path() != "/mnt") {
+            result.message = "The startup mount point must be directly below /mnt.";
+            return result;
+        }
+        const QFileInfo folderInfo(folder);
+        if (folderInfo.exists()
+            && (!folderInfo.isDir() || folderInfo.isSymLink()
+                || !QDir(folder).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).isEmpty())) {
+            result.message = "The startup mount point already exists and is not an empty directory.";
+            return result;
+        }
+        const QList<BlockDevice> inventory = devices(&error);
+        if (!error.isEmpty()) {
+            result.message = humanError(error);
+            return result;
+        }
+        for (const BlockDevice &candidate : inventory) {
+            if (candidate.objectPath == volume.objectPath) continue;
+            if (candidate.startupMountPoint == folder || candidate.mountPoints.contains(folder)) {
+                result.message = "Another volume already uses this mount point.";
+                return result;
+            }
+        }
+        qDBusRegisterMetaType<UDisksConfigurationItem>();
+        const UDisksConfigurationItem item = startupMountItem(folder, volume.fileSystem);
+        const QDBusMessage reply = interfaceCall(volume.objectPath,
+            "org.freedesktop.UDisks2.Block", "AddConfigurationItem",
+            {QVariant::fromValue(item), QVariantMap{}}, &error);
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            result.message = humanError(error);
+            return result;
+        }
+        BlockDevice refreshed;
+        if (!waitForDevice(volume.objectPath, &refreshed, &error, 12000,
+                [](const BlockDevice &current) { return current.aeroManagedStartupMount; })) {
+            result.partial = true;
+            result.message = "The startup mount was written, but UDisks2 did not report it back in time.";
+            return result;
+        }
+        result.success = true;
+        result.objectPath = volume.objectPath;
+        result.mountPoint = folder;
+        result.message = QString("The volume will mount at %1 when Aero7 starts.").arg(folder);
+        return result;
+    }
+
+    bool found = false;
+    for (const UDisksConfigurationItem &item : existing) {
+        if (!isAeroStartupMount(item)) continue;
+        found = true;
+        qDBusRegisterMetaType<UDisksConfigurationItem>();
+        const QDBusMessage reply = interfaceCall(volume.objectPath,
+            "org.freedesktop.UDisks2.Block", "RemoveConfigurationItem",
+            {QVariant::fromValue(item), QVariantMap{}}, &error);
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            result.message = humanError(error);
+            return result;
+        }
+    }
+    if (!found) {
+        result.message = "This startup mount is not managed by Aero7, so it was left unchanged.";
+        return result;
+    }
+    BlockDevice refreshed;
+    if (!waitForDevice(volume.objectPath, &refreshed, &error, 12000,
+            [](const BlockDevice &current) { return !current.aeroManagedStartupMount; })) {
+        result.partial = true;
+        result.message = "The startup mount removal was not reported back in time.";
+        return result;
+    }
+    result.success = true;
+    result.objectPath = volume.objectPath;
+    result.message = "The volume will no longer be mounted automatically at startup.";
     return result;
 }

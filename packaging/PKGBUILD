@@ -9,10 +9,10 @@ depends=('qt6-base' 'systemd' 'udisks2' 'polkit' 'shadow' 'dosfstools' 'e2fsprog
 makedepends=('cmake' 'ninja' 'git')
 optdepends=('samba: Shared Folders status'
             'linux-devmgmt: Device Manager integration'
-            'ntfs-3g: create and extend NTFS volumes'
+            'ntfs-3g: create and resize NTFS volumes'
             'exfatprogs: create exFAT volumes'
-            'btrfs-progs: create and extend Btrfs volumes'
-            'xfsprogs: create and extend XFS volumes')
+            'btrfs-progs: create and resize Btrfs volumes'
+            'xfsprogs: create and resize XFS volumes')
 source=("git+$url.git")
 sha256sums=('SKIP')
 

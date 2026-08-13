@@ -101,14 +101,18 @@ int main()
     if (target.objectPath != first.objectPath || target.deviceNumber != first.deviceNumber
         || !target.partition || target.offset != first.partitionOffset)
         return 13;
+    first.label = "My Project Disk";
+    first.partitionNumber = 2;
+    if (UDisksBackend::recommendedStartupMountPoint(first) != "/mnt/aero7-my-project-disk")
+        return 14;
     if (UDisksBackend::available()) {
         QString capabilityError;
         const auto capabilities = UDisksBackend::fileSystemCapabilities(&capabilityError);
-        if (capabilities.isEmpty() || !capabilityError.isEmpty()) return 14;
+        if (capabilities.isEmpty() || !capabilityError.isEmpty()) return 15;
         bool foundExt4 = false;
         for (const auto &capability : capabilities)
             if (capability.type == "ext4") foundExt4 = true;
-        if (!foundExt4) return 15;
+        if (!foundExt4) return 16;
     }
     return 0;
 }

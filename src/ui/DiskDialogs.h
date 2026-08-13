@@ -10,6 +10,7 @@
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
+class QLabel;
 class QRadioButton;
 class QSpinBox;
 
@@ -27,9 +28,6 @@ private:
 
 struct NewVolumeOptions {
     quint64 sizeBytes = 0;
-    QString driveLetter;
-    QString mountFolder;
-    enum Assignment { DriveLetter, Folder, None } assignment = DriveLetter;
     bool format = true;
     QString fileSystem;
     QString label;
@@ -40,7 +38,7 @@ class NewSimpleVolumeWizard final : public QWizard {
 public:
     NewSimpleVolumeWizard(const DiskFreeRegion &region,
                           const QList<FileSystemCapability> &capabilities,
-                          const QStringList &availableLetters, QWidget *parent = nullptr);
+                          QWidget *parent = nullptr);
     NewVolumeOptions options() const;
 
 private:
@@ -76,4 +74,16 @@ public:
 private:
     quint64 m_currentSize = 0;
     quint64 m_availableSize = 0;
+};
+
+class ShrinkVolumeDialog final : public QDialog {
+public:
+    ShrinkVolumeDialog(const QString &volumeName, quint64 currentSize,
+                       quint64 maximumShrink, QWidget *parent = nullptr);
+    quint64 shrinkBytes() const;
+
+private:
+    quint64 m_currentSize = 0;
+    QSpinBox *m_amount = nullptr;
+    QLabel *m_after = nullptr;
 };

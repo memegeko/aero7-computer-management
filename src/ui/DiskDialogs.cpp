@@ -6,7 +6,6 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
-#include <QFileDialog>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGroupBox>
@@ -148,7 +147,7 @@ QString InitializeDiskDialog::partitionTableType() const
 
 NewSimpleVolumeWizard::NewSimpleVolumeWizard(
     const DiskFreeRegion &region, const QList<FileSystemCapability> &capabilities,
-    const QStringList &availableLetters, QWidget *parent)
+    QWidget *parent)
     : QWizard(parent), m_regionSize(region.size)
 {
     setWindowTitle("New Simple Volume Wizard");
@@ -176,50 +175,6 @@ NewSimpleVolumeWizard::NewSimpleVolumeWizard(
     sizeLayout->addLayout(sizeForm);
     sizeLayout->addStretch();
     addPage(sizePage);
-
-    auto *assignPage = new QWizardPage;
-    auto *assignLayout = new QVBoxLayout(assignPage);
-    assignLayout->addWidget(wizardHeading("Assign Drive Letter or Path"));
-    auto *assignText = new QLabel("For easier access, you can assign a drive letter or drive path to your partition.");
-    assignText->setWordWrap(true);
-    assignLayout->addWidget(assignText);
-    auto *letterRow = new QHBoxLayout;
-    auto *letterRadio = new QRadioButton("Assign the following drive letter:");
-    letterRadio->setObjectName("assignDriveLetter");
-    letterRadio->setChecked(true);
-    auto *letters = new QComboBox;
-    letters->setObjectName("driveLetter");
-    for (const QString &letter : availableLetters) letters->addItem(letter);
-    letterRow->addWidget(letterRadio);
-    letterRow->addWidget(letters);
-    letterRow->addStretch();
-    assignLayout->addLayout(letterRow);
-    auto *folderRow = new QHBoxLayout;
-    auto *folderRadio = new QRadioButton("Mount in the following empty folder:");
-    folderRadio->setObjectName("assignFolder");
-    auto *folder = new QLineEdit;
-    folder->setObjectName("mountFolder");
-    auto *browse = new QPushButton("Browse...");
-    folderRow->addWidget(folderRadio);
-    folderRow->addWidget(folder);
-    folderRow->addWidget(browse);
-    assignLayout->addLayout(folderRow);
-    auto *noneRadio = new QRadioButton("Do not assign a drive letter or drive path");
-    noneRadio->setObjectName("assignNone");
-    assignLayout->addWidget(noneRadio);
-    auto *assignmentGroup = new QButtonGroup(assignPage);
-    assignmentGroup->addButton(letterRadio);
-    assignmentGroup->addButton(folderRadio);
-    assignmentGroup->addButton(noneRadio);
-    connect(browse, &QPushButton::clicked, assignPage, [folder, assignPage] {
-        const QString path = QFileDialog::getExistingDirectory(assignPage, "Select Empty Folder");
-        if (!path.isEmpty()) folder->setText(path);
-    });
-    connect(folderRadio, &QRadioButton::toggled, folder, &QWidget::setEnabled);
-    connect(letterRadio, &QRadioButton::toggled, letters, &QWidget::setEnabled);
-    folder->setEnabled(false);
-    assignLayout->addStretch();
-    addPage(assignPage);
 
     auto *formatPage = new QWizardPage;
     auto *formatLayout = new QVBoxLayout(formatPage);
@@ -273,14 +228,10 @@ NewSimpleVolumeWizard::NewSimpleVolumeWizard(
         const NewVolumeOptions value = options();
         summary->setPlainText(QString("Volume type: Simple Volume\n"
                                       "Volume size: %1 MB\n"
-                                      "Drive letter or path: %2\n"
-                                      "File system: %3\n"
+                                      "File system: %2\n"
                                       "Allocation unit size: Default\n"
-                                      "Volume label: %4")
+                                      "Volume label: %3")
             .arg(value.sizeBytes / MiB)
-            .arg(value.assignment == NewVolumeOptions::None ? "None"
-                 : value.assignment == NewVolumeOptions::Folder ? value.mountFolder
-                 : value.driveLetter)
             .arg(value.format ? formatName(value.fileSystem, capabilities) : "Do not format")
             .arg(value.format ? value.label : "—"));
     });
@@ -291,20 +242,11 @@ NewVolumeOptions NewSimpleVolumeWizard::options() const
 {
     NewVolumeOptions result;
     const auto *size = findChild<QSpinBox *>("simpleVolumeSizeMiB");
-    const auto *letters = findChild<QComboBox *>("driveLetter");
-    const auto *folder = findChild<QLineEdit *>("mountFolder");
-    const auto *assignFolder = findChild<QRadioButton *>("assignFolder");
-    const auto *assignNone = findChild<QRadioButton *>("assignNone");
     const auto *doFormat = findChild<QRadioButton *>("doFormat");
     const auto *fileSystem = findChild<QComboBox *>("fileSystem");
     const auto *label = findChild<QLineEdit *>("volumeLabel");
     const auto *quick = findChild<QCheckBox *>("quickFormat");
     result.sizeBytes = quint64(size ? size->value() : 0) * MiB;
-    result.driveLetter = letters ? letters->currentText() : QString{};
-    result.mountFolder = folder ? folder->text().trimmed() : QString{};
-    result.assignment = assignNone && assignNone->isChecked() ? NewVolumeOptions::None
-        : assignFolder && assignFolder->isChecked() ? NewVolumeOptions::Folder
-                                                    : NewVolumeOptions::DriveLetter;
     result.format = doFormat && doFormat->isChecked();
     result.fileSystem = fileSystem ? fileSystem->currentData().toString() : QString{};
     result.label = label ? label->text().trimmed() : QString{};
@@ -413,4 +355,52 @@ quint64 ExtendVolumeWizard::additionalBytes() const
 {
     const auto *amount = findChild<QSpinBox *>("extendAmountMiB");
     return quint64(amount ? amount->value() : 0) * MiB;
+}
+
+ShrinkVolumeDialog::ShrinkVolumeDialog(const QString &volumeName, quint64 currentSize,
+                                       quint64 maximumShrink, QWidget *parent)
+    : QDialog(parent), m_currentSize(currentSize)
+{
+    setWindowTitle("Shrink " + volumeName);
+    setModal(true);
+    resize(510, 290);
+    auto *layout = new QVBoxLayout(this);
+    auto *intro = new QLabel("The volume will be reduced and the released space will become unallocated.");
+    intro->setWordWrap(true);
+    layout->addWidget(intro);
+    auto *form = new QFormLayout;
+    const quint64 currentMiB = currentSize / MiB;
+    const quint64 maximumMiB = maximumShrink / MiB;
+    form->addRow("Total size before shrink in MB:", new QLabel(QString::number(currentMiB)));
+    form->addRow("Size of available shrink space in MB:",
+                 new QLabel(QString::number(maximumMiB)));
+    m_amount = new QSpinBox;
+    m_amount->setObjectName("shrinkAmountMiB");
+    const int maximum = int(qMin<quint64>(maximumMiB, std::numeric_limits<int>::max()));
+    m_amount->setRange(8, qMax(8, maximum));
+    m_amount->setValue(qMax(8, maximum));
+    m_amount->setSuffix(" MB");
+    form->addRow("Enter the amount of space to shrink in MB:", m_amount);
+    m_after = new QLabel;
+    form->addRow("Total size after shrink in MB:", m_after);
+    layout->addLayout(form);
+    auto *note = new QLabel("Aero7 keeps used data plus a safety reserve. Shrinking may temporarily unmount the volume.");
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    layout->addStretch();
+    auto updateAfter = [this] {
+        m_after->setText(QString::number(m_currentSize / MiB - quint64(m_amount->value())));
+    };
+    connect(m_amount, &QSpinBox::valueChanged, this, updateAfter);
+    updateAfter();
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
+    auto *shrink = buttons->addButton("Shrink", QDialogButtonBox::AcceptRole);
+    connect(shrink, &QPushButton::clicked, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    layout->addWidget(buttons);
+}
+
+quint64 ShrinkVolumeDialog::shrinkBytes() const
+{
+    return quint64(m_amount ? m_amount->value() : 0) * MiB;
 }

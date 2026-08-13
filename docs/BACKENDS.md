@@ -9,7 +9,7 @@
 | Users / Groups | libc `getpwent`/`getgrent`; shadow tools through polkit helper | Inventory, properties, user/group creation and authenticated maintenance |
 | Performance Monitor | `/proc/stat`, `/proc/meminfo`, `/proc/diskstats`, `/proc/net/dev` | Asynchronous one-second sampling and a 120-sample selectable graph |
 | Device Manager | external `devmgmt` | Availability check and launch without duplicating hardware scanning |
-| Disk Management | UDisks2 over Qt D-Bus | Inventory, free-region modelling, GPT/MBR initialization, partition creation, filesystem formatting, same-disk extension, tracked mount folders, mount/unmount, rescan, and properties |
+| Disk Management | UDisks2 over Qt D-Bus | Inventory, free-region modelling, GPT/MBR initialization, partition creation, filesystem formatting, same-disk extend/shrink, partition deletion, tracked `/etc/fstab` startup mounts, mount/unmount, rescan, and properties |
 | Services | systemd system/user D-Bus managers | Inventory, startup state, dependencies, logs, lifecycle and unit-file actions |
 
 The labels translate Linux concepts into the Aero7 interface; they do not
@@ -34,8 +34,16 @@ mutation. It refuses read-only media and any drive containing `/`, `/boot`, or
 `/boot/efi`. Each destructive flow has a final confirmation and every result is
 verified from a fresh inventory.
 
-UDisks2's `CanFormat` and `CanResize` determine which filesystems and extend
-actions are enabled. Extension first grows the partition and then the
-filesystem. If the second step fails, the UI reports the partial result rather
-than claiming success. Dynamic-disk spanning, deletion, and shrink remain
-deliberately deferred.
+UDisks2's `CanFormat` and `CanResize` determine which filesystem actions are
+enabled. Extension grows the partition before the filesystem. Shrink measures
+real free space, reserves the larger of 256 MiB or five percent, shrinks the
+filesystem first, unmounts it before moving the partition boundary, and then
+restores its original mount state. A partial result is reported rather than
+claiming success if only one stage completes.
+
+Delete Volume calls the UDisks2 partition `Delete` method with tracked teardown
+enabled, so an Aero7-managed startup-mount entry is removed with the partition.
+Mount at Startup adds a UUID-backed `fstab` configuration item through UDisks2
+at a user-confirmed `/mnt/aero7-*` path. Only entries tagged as Aero7-managed
+can be removed through this action; pre-existing administrator entries are
+never silently changed.

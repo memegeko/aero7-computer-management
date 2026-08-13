@@ -25,6 +25,7 @@ struct BlockDevice {
     QString partitionTableObjectPath;
     QString partitionType;
     QString mountPoint;
+    QString startupMountPoint;
     QStringList mountPoints;
     quint64 size = 0;
     quint64 freeBytes = 0;
@@ -41,6 +42,8 @@ struct BlockDevice {
     bool optical = false;
     bool partitionable = false;
     bool critical = false;
+    bool mountAtStartup = false;
+    bool aeroManagedStartupMount = false;
 };
 
 struct DiskFreeRegion {
@@ -68,6 +71,8 @@ struct FileSystemCapability {
     QString type;
     QString displayName;
     bool canFormat = false;
+    bool canShrinkMounted = false;
+    bool canShrinkUnmounted = false;
     bool canGrowMounted = false;
     bool canGrowUnmounted = false;
     QString missingUtility;
@@ -83,7 +88,6 @@ struct CreateVolumeRequest {
     bool format = true;
     bool quickFormat = true;
     bool mount = true;
-    QString mountFolder;
 };
 
 struct FormatVolumeRequest {
@@ -99,6 +103,12 @@ struct ExtendVolumeRequest {
     quint64 additionalBytes = 0;
     quint64 expectedAdjacentOffset = 0;
     quint64 expectedAdjacentSize = 0;
+};
+
+struct ShrinkVolumeRequest {
+    DiskOperationTarget volume;
+    quint64 amountBytes = 0;
+    bool remount = true;
 };
 
 struct DiskOperationResult {
@@ -127,9 +137,17 @@ public:
     static QList<FileSystemCapability> fileSystemCapabilities(QString *error = nullptr);
     static std::optional<FileSystemCapability> capabilityFor(const QString &type,
                                                               QString *error = nullptr);
+    static quint64 maximumShrinkBytes(const DiskOperationTarget &volume,
+                                      QString *error = nullptr);
     static bool initializeDisk(const DiskOperationTarget &disk, const QString &tableType,
                                QString *error = nullptr);
     static DiskOperationResult createVolume(const CreateVolumeRequest &request);
     static DiskOperationResult formatVolume(const FormatVolumeRequest &request);
     static DiskOperationResult extendVolume(const ExtendVolumeRequest &request);
+    static DiskOperationResult shrinkVolume(const ShrinkVolumeRequest &request);
+    static DiskOperationResult deleteVolume(const DiskOperationTarget &volume);
+    static QString recommendedStartupMountPoint(const BlockDevice &volume);
+    static DiskOperationResult setMountAtStartup(const DiskOperationTarget &volume,
+                                                 bool enabled,
+                                                 const QString &mountPoint = {});
 };

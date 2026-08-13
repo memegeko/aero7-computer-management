@@ -16,9 +16,10 @@
 
 ## Deliberately deferred
 
-- Delete Volume, Shrink Volume, offline/online disks, filesystem repair, and
-  dynamic/LVM volume workflows. Initialization, simple-volume creation,
-  formatting, and same-disk extension now use the UDisks2 safety design.
+- Offline/online disk state, filesystem repair, encryption, and dynamic/LVM
+  volume workflows. Initialization, simple-volume creation, formatting,
+  same-disk extend/shrink, deletion, and persistent startup mounting now use
+  the UDisks2 safety design.
 - Closing active Samba sessions or remote files. Samba does not expose a
   stable unprivileged API for this operation, so it will need a separately
   reviewed privileged helper.

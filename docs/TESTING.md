@@ -37,9 +37,11 @@ Run the GUI as the normal desktop user. Do not start it with `sudo`.
 - Disk Management lists physical disks, partitions, and unallocated extents.
   On disposable secondary VM disks, test blank GPT and MBR initialization,
   full and partial New Simple Volumes, every available filesystem, mount/no
-  mount, reformat, partial/full extension, and cancellation at every page.
+  mount, reformat, partial/full extension, safe shrinking, confirmed deletion,
+  startup-mount enable/disable, and cancellation at every page.
   Validate each result with `lsblk`, `blkid`, and UDisks2—not only the UI.
-- Confirm Format and Extend are unavailable for the Aero7 root/boot disk and
+- Confirm Format, Extend, Shrink, Delete, and startup-mount changes are
+  unavailable for the Aero7 root/boot disk and
   that stale identity, read-only, busy, missing-tool, and no-adjacent-space
   errors are human-readable.
 - Services lists system and user services; Properties includes dependencies
@@ -79,3 +81,11 @@ The multi-disk fixture was used to verify the following real UDisks2 path:
   unallocated.
 - Keeping the New Simple Volume wizard open across the periodic refresh timer
   no longer invalidates its disk target or crashes the process.
+
+For Shrink Volume, validate the filesystem before and after, confirm the new
+unallocated extent matches the selected reduction (within partition alignment),
+and verify a previously mounted volume is mounted again. For Mount at Startup,
+confirm UDisks reports an `fstab` configuration item, reboot the disposable VM,
+verify the `/mnt/aero7-*` mount, disable it through the UI, and verify the entry
+is removed. Delete only a fixture partition and confirm both its UDisks object
+and any Aero7-managed startup entry disappear.

@@ -771,6 +771,11 @@ public:
         result << "Properties" << "Help";
         if (canFormat(*device)) result.prepend("Format...");
         if (canExtend(*device)) result.prepend("Extend Volume...");
+        if (canShrink(*device)) result.prepend("Shrink Volume...");
+        if (canDelete(*device)) result.prepend("Delete Volume...");
+        if (canManageStartupMount(*device))
+            result << (device->aeroManagedStartupMount
+                ? "Disable Mount at Startup" : "Mount at Startup...");
         if (device->mountable)
             result << (device->mountPoint.isEmpty() ? "Mount" : "Unmount");
         if (!device->mountPoint.isEmpty()) result << "Open" << "Explore";
@@ -885,9 +890,21 @@ public:
             extendVolume();
             return;
         }
+        if (action == "Shrink Volume...") {
+            shrinkVolume();
+            return;
+        }
+        if (action == "Delete Volume...") {
+            deleteVolume();
+            return;
+        }
+        if (action == "Mount at Startup..." || action == "Disable Mount at Startup") {
+            setMountAtStartup(action == "Mount at Startup...");
+            return;
+        }
         if (action == "Help") {
             QMessageBox::information(this, "Disk Management Help",
-                "Initialize creates an empty GPT or MBR partition table. New Simple Volume creates and optionally formats a partition. Format erases a selected volume. Extend grows a compatible partition and its filesystem into adjacent unallocated space.");
+                "Initialize creates an empty GPT or MBR partition table. New Simple Volume creates and optionally formats a partition. Format erases a selected volume. Extend and Shrink resize compatible filesystems and partitions. Delete Volume releases a partition as unallocated space. Mount at Startup adds a persistent Aero7 mount entry.");
             return;
         }
         if (action == "Open" || action == "Explore") {
@@ -907,14 +924,7 @@ public:
 private:
     static QString displayName(const BlockDevice &device)
     {
-        const QString base = device.label.isEmpty() ? device.device : device.label;
-        QSettings settings("Aero7", "ComputerManagement");
-        QString letter;
-        if (!device.partUuid.isEmpty())
-            letter = settings.value("DriveLetters/partuuid-" + device.partUuid).toString();
-        if (letter.isEmpty() && !device.uuid.isEmpty())
-            letter = settings.value("DriveLetters/" + device.uuid).toString();
-        return letter.isEmpty() ? base : QString("%1 (%2)").arg(base, letter);
+        return device.label.isEmpty() ? device.device : device.label;
     }
 
     static QString status(const BlockDevice &device)
@@ -990,21 +1000,6 @@ private:
         return number;
     }
 
-    QStringList availableDriveLetters() const
-    {
-        QSet<QString> used;
-        QSettings settings("Aero7", "ComputerManagement");
-        settings.beginGroup("DriveLetters");
-        for (const QString &key : settings.childKeys()) used.insert(settings.value(key).toString());
-        settings.endGroup();
-        QStringList result;
-        for (QChar letter = 'D'; letter <= 'Z'; letter = QChar(letter.unicode() + 1)) {
-            const QString value = QString(letter) + ':';
-            if (!used.contains(value)) result << value;
-        }
-        return result;
-    }
-
     const BlockDevice *diskForRegion(const DiskFreeRegion &region) const
     {
         for (const BlockDevice &device : m_devices)
@@ -1024,6 +1019,26 @@ private:
             || !UDisksBackend::adjacentFreeRegion(m_devices, device)) return false;
         const auto capability = UDisksBackend::capabilityFor(device.fileSystem);
         return capability && (capability->canGrowMounted || capability->canGrowUnmounted);
+    }
+
+    bool canShrink(const BlockDevice &device) const
+    {
+        if (!device.partition || device.readOnly || device.critical || device.fileSystem.isEmpty())
+            return false;
+        const auto capability = UDisksBackend::capabilityFor(device.fileSystem);
+        return capability && (capability->canShrinkMounted || capability->canShrinkUnmounted);
+    }
+
+    static bool canDelete(const BlockDevice &device)
+    {
+        return device.partition && !device.readOnly && !device.critical;
+    }
+
+    static bool canManageStartupMount(const BlockDevice &device)
+    {
+        return device.mountable && !device.uuid.isEmpty()
+            && !device.readOnly && !device.critical
+            && (!device.mountAtStartup || device.aeroManagedStartupMount);
     }
 
     struct BusyCursor {
@@ -1079,7 +1094,7 @@ private:
         }
         QString capabilityError;
         const auto capabilities = UDisksBackend::fileSystemCapabilities(&capabilityError);
-        NewSimpleVolumeWizard wizard(region, capabilities, availableDriveLetters(), this);
+        NewSimpleVolumeWizard wizard(region, capabilities, this);
         if (wizard.exec() != QDialog::Accepted) return;
         const NewVolumeOptions options = wizard.options();
         if (!confirm(this, "New Simple Volume",
@@ -1097,30 +1112,13 @@ private:
         request.label = options.label;
         request.format = options.format;
         request.quickFormat = options.quickFormat;
-        request.mount = options.format && options.assignment != NewVolumeOptions::None;
-        request.mountFolder = options.assignment == NewVolumeOptions::Folder
-            ? options.mountFolder : QString{};
+        request.mount = options.format;
         DiskOperationResult operation;
         {
             BusyCursor cursor;
             operation = UDisksBackend::createVolume(request);
         }
         refresh();
-        if (operation.success && options.assignment == NewVolumeOptions::DriveLetter
-            && !operation.objectPath.isEmpty()) {
-            for (const BlockDevice &created : m_devices) {
-            if (created.objectPath == operation.objectPath
-                && (!created.partUuid.isEmpty() || !created.uuid.isEmpty())) {
-                    QSettings settings("Aero7", "ComputerManagement");
-                    const QString key = !created.partUuid.isEmpty()
-                        ? "DriveLetters/partuuid-" + created.partUuid
-                        : "DriveLetters/" + created.uuid;
-                    settings.setValue(key, options.driveLetter);
-                    refresh();
-                    break;
-                }
-            }
-        }
         if (operation.success) QMessageBox::information(this, "New Simple Volume", operation.message);
         else QMessageBox::warning(this, operation.partial ? "New Simple Volume — Partially Completed"
                                                         : "New Simple Volume", operation.message);
@@ -1179,6 +1177,95 @@ private:
                                                         : "Extend Volume", operation.message);
     }
 
+    void shrinkVolume()
+    {
+        const BlockDevice *device = selectedDevice();
+        if (!device || !canShrink(*device)) return;
+        const DiskOperationTarget target = UDisksBackend::targetFor(*device);
+        const QString volumeName = displayName(*device);
+        QString error;
+        quint64 maximum = 0;
+        {
+            BusyCursor cursor;
+            maximum = UDisksBackend::maximumShrinkBytes(target, &error);
+        }
+        refresh();
+        if (!maximum) {
+            QMessageBox::warning(this, "Shrink Volume", error.isEmpty()
+                ? "This volume does not have enough verified free space to shrink." : error);
+            return;
+        }
+        ShrinkVolumeDialog dialog(volumeName, target.size, maximum, this);
+        if (dialog.exec() != QDialog::Accepted) return;
+        const quint64 amount = dialog.shrinkBytes();
+        if (!confirm(this, "Shrink Volume",
+            QString("Shrink %1 by %2?\n\nThe released space will become unallocated. "
+                    "The volume may be temporarily unavailable while it is resized.")
+                .arg(volumeName, Format::bytes(amount)))) return;
+        DiskOperationResult operation;
+        {
+            BusyCursor cursor;
+            operation = UDisksBackend::shrinkVolume({target, amount, true});
+        }
+        refresh();
+        if (operation.success) QMessageBox::information(this, "Shrink Volume", operation.message);
+        else QMessageBox::warning(this, operation.partial ? "Shrink Volume — Partially Completed"
+                                                        : "Shrink Volume", operation.message);
+    }
+
+    void deleteVolume()
+    {
+        const BlockDevice *device = selectedDevice();
+        if (!device || !canDelete(*device)) return;
+        const DiskOperationTarget target = UDisksBackend::targetFor(*device);
+        const QString volumeName = displayName(*device);
+        if (QMessageBox::warning(this, "Delete Simple Volume",
+            QString("Deleting %1 will erase all data on it.\n\n"
+                    "The partition will be removed and its space will become unallocated. "
+                    "This action cannot be undone.\n\nDo you want to continue?").arg(volumeName),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
+        DiskOperationResult operation;
+        {
+            BusyCursor cursor;
+            operation = UDisksBackend::deleteVolume(target);
+        }
+        refresh();
+        if (operation.success) QMessageBox::information(this, "Delete Volume", operation.message);
+        else QMessageBox::warning(this, operation.partial ? "Delete Volume — Partially Completed"
+                                                        : "Delete Volume", operation.message);
+    }
+
+    void setMountAtStartup(bool enabled)
+    {
+        const BlockDevice *device = selectedDevice();
+        if (!device || !canManageStartupMount(*device)) return;
+        const DiskOperationTarget target = UDisksBackend::targetFor(*device);
+        QString folder;
+        if (enabled) {
+            bool accepted = false;
+            folder = QInputDialog::getText(this, "Mount at Startup", "Mount point:",
+                QLineEdit::Normal, UDisksBackend::recommendedStartupMountPoint(*device), &accepted);
+            if (!accepted) return;
+            folder = folder.trimmed();
+            if (!confirm(this, "Mount at Startup",
+                QString("Add this volume to Aero7 startup mounting at %1?\n\n"
+                        "This writes a persistent system mount entry and requires administrator authorization.")
+                    .arg(folder))) return;
+        } else if (!confirm(this, "Disable Mount at Startup",
+            QString("Stop mounting this volume automatically at %1?")
+                .arg(device->startupMountPoint))) return;
+        DiskOperationResult operation;
+        {
+            BusyCursor cursor;
+            operation = UDisksBackend::setMountAtStartup(target, enabled, folder);
+        }
+        refresh();
+        const QString title = enabled ? "Mount at Startup" : "Disable Mount at Startup";
+        if (operation.success) QMessageBox::information(this, title, operation.message);
+        else QMessageBox::warning(this, operation.partial ? title + " — Partially Completed" : title,
+                                  operation.message);
+    }
+
     void properties()
     {
         const BlockDevice *device = selectedDevice();
@@ -1196,6 +1283,8 @@ private:
              {"UUID", device->uuid},
              {"PARTUUID", device->partUuid},
              {"Mount point", device->mountPoints.join(", ")},
+             {"Mount at startup", device->mountAtStartup
+                ? QString("Yes (%1)").arg(device->startupMountPoint) : "No"},
              {"Free space", device->freeSpaceKnown ? Format::bytes(device->freeBytes) : "—"},
              {"System device", yesNo(device->systemDevice)},
              {"Removable", yesNo(device->removable)},

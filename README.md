@@ -58,7 +58,7 @@ it.
 | Local Users and Groups | Linux accounts and groups | View accounts and groups and perform authenticated standard account operations |
 | Performance Monitor | `/proc` and `/sys` | Live CPU, memory, swap, disk, network, process, and context-switch graphs with stable navigation panes |
 | Device Manager | [linux-devmgmt](https://github.com/memegeko/linux-devmgmt) | Open the complete device tree or jump directly to a searchable hardware category |
-| Disk Management | UDisks2 | Classic disk map, GPT/MBR initialization, simple-volume creation, formatting, extension, mount/unmount, rescan, and properties |
+| Disk Management | UDisks2 | Classic disk map, GPT/MBR initialization, simple-volume creation, format, extend, shrink, delete, persistent startup mounting, mount/unmount, rescan, and properties |
 | Services | systemd | View system and user services, dependencies and logs, and perform service lifecycle actions |
 
 ### Disk Management
@@ -69,9 +69,11 @@ file systems, capacity, free space, partition state, and removable media come
 from UDisks2.
 
 Safe actions such as refresh, rescan, properties, mount, unmount, and opening a
-mount point are available. Initialize Disk, New Simple Volume, Format, and
-Extend Volume use classic wizard flows with real UDisks2 operations. Deleting,
-shrinking, dynamic-disk spanning, and RAID-5 volume creation remain
+mount point are available. Initialize Disk, New Simple Volume, Format, Extend
+Volume, Shrink Volume, Delete Volume, and Mount at Startup use real UDisks2
+operations with identity checks and confirmations. Drive-letter assignment is
+not shown because Linux identifies filesystems by stable UUIDs and exposes them
+through mount points. Dynamic-disk spanning and RAID-5 volume creation remain
 intentionally unavailable in this development milestone.
 
 ### Start-menu integration
@@ -116,8 +118,8 @@ links, navigation layout, and backend data handling. Releases are also tested
 inside an Aero7 virtual machine through the same signed packages delivered to
 installed systems.
 
-Destructive storage operations are the main intentionally deferred area. See
-the [roadmap](docs/ROADMAP.md) for the remaining work.
+Advanced storage pools, RAID, repair, and encryption workflows remain future
+work. See the [roadmap](docs/ROADMAP.md) for details.
 
 ## Documentation
 
