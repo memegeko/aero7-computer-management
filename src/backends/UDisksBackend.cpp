@@ -92,6 +92,17 @@ quint64 shrinkCapacity(const BlockDevice &volume)
     return maximum / MiB * MiB;
 }
 
+bool requiresPreShrinkRepair(const QString &fileSystem)
+{
+    // resize2fs refuses to shrink an ext filesystem unless a forced e2fsck
+    // has completed since it was last mounted. UDisks2's Filesystem.Check is
+    // deliberately read-only and does not satisfy that requirement, while
+    // Filesystem.Repair performs the required offline e2fsck through the
+    // normal UDisks2/Polkit authorization path.
+    const QString type = fileSystem.toLower();
+    return type == "ext2" || type == "ext3" || type == "ext4";
+}
+
 bool interfaceCall(const QString &path, const QString &interface, const QString &method,
                    QString *error)
 {
@@ -928,10 +939,27 @@ DiskOperationResult UDisksBackend::shrinkVolume(const ShrinkVolumeRequest &reque
         else if (!wasMounted && !current.mountPoint.isEmpty())
             unmount(volume.objectPath, nullptr);
     };
-    if (!capability->canShrinkMounted && !unmount(volume.objectPath, &error)) {
+    const bool needsOfflinePreparation = requiresPreShrinkRepair(volume.fileSystem);
+    if ((!capability->canShrinkMounted || needsOfflinePreparation)
+        && !unmount(volume.objectPath, &error)) {
         restoreOriginalMountState();
         result.message = humanError(error);
         return result;
+    }
+    if (needsOfflinePreparation) {
+        const QDBusMessage repair = interfaceCall(volume.objectPath,
+            "org.freedesktop.UDisks2.Filesystem", "Repair", {QVariantMap{}}, &error,
+            1800000);
+        const bool repaired = repair.type() != QDBusMessage::ErrorMessage
+            && !repair.arguments().isEmpty() && repair.arguments().constFirst().toBool();
+        if (!repaired) {
+            restoreOriginalMountState();
+            result.message = repair.type() == QDBusMessage::ErrorMessage
+                ? "The required filesystem check could not be completed: " + humanError(error)
+                : "The required filesystem check found errors that could not be repaired. "
+                  "The volume was left unchanged.";
+            return result;
+        }
     }
     const quint64 requestedSize = volume.size - request.amountBytes;
     const QDBusMessage fileSystemResize = interfaceCall(volume.objectPath,

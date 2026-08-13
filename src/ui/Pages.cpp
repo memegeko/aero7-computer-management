@@ -1200,7 +1200,8 @@ private:
         const quint64 amount = dialog.shrinkBytes();
         if (!confirm(this, "Shrink Volume",
             QString("Shrink %1 by %2?\n\nThe released space will become unallocated. "
-                    "The volume may be temporarily unavailable while it is resized.")
+                    "The volume may be temporarily unavailable while it is resized. "
+                    "Compatible filesystems are checked and repaired first when required.")
                 .arg(volumeName, Format::bytes(amount)))) return;
         DiskOperationResult operation;
         {

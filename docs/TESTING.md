@@ -84,7 +84,8 @@ The multi-disk fixture was used to verify the following real UDisks2 path:
 
 For Shrink Volume, validate the filesystem before and after, confirm the new
 unallocated extent matches the selected reduction (within partition alignment),
-and verify a previously mounted volume is mounted again. For Mount at Startup,
+verify an ext filesystem receives its required offline consistency check, and
+verify a previously mounted volume is mounted again. For Mount at Startup,
 confirm UDisks reports an `fstab` configuration item, reboot the disposable VM,
 verify the `/mnt/aero7-*` mount, disable it through the UI, and verify the entry
 is removed. Delete only a fixture partition and confirm both its UDisks object

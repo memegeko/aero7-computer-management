@@ -71,8 +71,10 @@ from UDisks2.
 Safe actions such as refresh, rescan, properties, mount, unmount, and opening a
 mount point are available. Initialize Disk, New Simple Volume, Format, Extend
 Volume, Shrink Volume, Delete Volume, and Mount at Startup use real UDisks2
-operations with identity checks and confirmations. Drive-letter assignment is
-not shown because Linux identifies filesystems by stable UUIDs and exposes them
+operations with identity checks and confirmations. Shrinking ext2/3/4 volumes
+also runs the required offline filesystem repair check before resizing.
+Drive-letter assignment is not shown because Linux identifies filesystems by
+stable UUIDs and exposes them
 through mount points. Dynamic-disk spanning and RAID-5 volume creation remain
 intentionally unavailable in this development milestone.
 

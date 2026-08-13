@@ -38,7 +38,9 @@ UDisks2's `CanFormat` and `CanResize` determine which filesystem actions are
 enabled. Extension grows the partition before the filesystem. Shrink measures
 real free space, reserves the larger of 256 MiB or five percent, shrinks the
 filesystem first, unmounts it before moving the partition boundary, and then
-restores its original mount state. A partial result is reported rather than
+restores its original mount state. Ext2/3/4 shrinking first runs UDisks2's
+offline repair action, which performs the forced consistency check required by
+`resize2fs`. A partial result is reported rather than
 claiming success if only one stage completes.
 
 Delete Volume calls the UDisks2 partition `Delete` method with tracked teardown

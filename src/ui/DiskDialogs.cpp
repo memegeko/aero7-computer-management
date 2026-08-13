@@ -384,7 +384,7 @@ ShrinkVolumeDialog::ShrinkVolumeDialog(const QString &volumeName, quint64 curren
     m_after = new QLabel;
     form->addRow("Total size after shrink in MB:", m_after);
     layout->addLayout(form);
-    auto *note = new QLabel("Aero7 keeps used data plus a safety reserve. Shrinking may temporarily unmount the volume.");
+    auto *note = new QLabel("Aero7 keeps used data plus a safety reserve. Shrinking may temporarily unmount the volume and run a required filesystem check.");
     note->setWordWrap(true);
     layout->addWidget(note);
     layout->addStretch();
