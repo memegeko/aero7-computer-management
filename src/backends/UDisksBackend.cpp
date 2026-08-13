@@ -902,11 +902,13 @@ DiskOperationResult UDisksBackend::shrinkVolume(const ShrinkVolumeRequest &reque
     }
     const bool wasMounted = !volume.mountPoint.isEmpty();
     if (!wasMounted) {
-        if (!mount(volume.objectPath, &error)
+        const bool mountedForMeasurement = mount(volume.objectPath, &error);
+        if (!mountedForMeasurement
             || !waitForDevice(volume.objectPath, &volume, &error, 12000,
                               [](const BlockDevice &current) {
                                   return current.freeSpaceKnown && !current.mountPoint.isEmpty();
                               })) {
+            if (mountedForMeasurement) unmount(volume.objectPath, nullptr);
             result.message = "Free space could not be measured safely: " + humanError(error);
             return result;
         }
